@@ -32,11 +32,11 @@ jobs:
           sccache: 'true'
           manylinux: auto
           before-script-linux: |
-            # Install OpenBLAS, OpenSSL development files and pkg-config
+            # Install build dependencies for static OpenBLAS compilation
             if command -v yum &> /dev/null; then
-              yum install -y openblas-devel openssl-devel pkgconfig perl-IPC-Cmd
+              yum install -y gcc-gfortran openssl-devel pkgconfig perl-IPC-Cmd make
             elif command -v apt-get &> /dev/null; then
-              apt-get update && apt-get install -y libopenblas-dev libssl-dev pkg-config
+              apt-get update && apt-get install -y gfortran libssl-dev pkg-config make
             fi
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -59,14 +59,11 @@ jobs:
           sccache: 'true'
           manylinux: auto
           before-script-linux: |
-            # Install OpenBLAS, OpenSSL development files and pkg-config
+            # Install build dependencies for static OpenBLAS compilation
             if command -v yum &> /dev/null; then
-              yum install -y epel-release || true
-              yum install -y openblas-devel openssl-devel pkgconfig perl-IPC-Cmd || \
-                yum install -y OpenBLAS-devel openssl-devel pkgconfig perl-IPC-Cmd || \
-                (yum install -y gcc-gfortran && yum install -y openblas-devel openssl-devel pkgconfig perl-IPC-Cmd)
+              yum install -y gcc-gfortran openssl-devel pkgconfig perl-IPC-Cmd make
             elif command -v apt-get &> /dev/null; then
-              apt-get update && apt-get install -y libopenblas-dev libssl-dev pkg-config
+              apt-get update && apt-get install -y gfortran libssl-dev pkg-config make
             fi
       - name: Upload wheels
         uses: actions/upload-artifact@v4
