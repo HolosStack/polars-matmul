@@ -1,0 +1,174 @@
+# polars-matmul
+
+BLAS-accelerated similarity joins for Polars.
+
+[![PyPI](https://img.shields.io/pypi/v/polars-matmul.svg)](https://pypi.org/project/polars-matmul/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+## Why?
+
+Computing similarity between embedding vectors in Polars is slow:
+
+| Approach | Time (100×2000, 100d) | Memory |
+|----------|----------------------|--------|
+| Polars cross-join + list ops | ~1800ms | 7.8GB |
+| NumPy matmul | ~2ms | 160MB |
+| **polars-matmul** | ~1.3ms | 160MB |
+
+This plugin provides NumPy-level performance by:
+- Using BLAS-accelerated matrix multiplication (Accelerate on macOS, OpenBLAS on Linux)
+- Avoiding cross-join memory explosion
+- Operating directly on contiguous arrays
+
+## Installation
+
+```bash
+pip install polars-matmul
+```
+
+Pre-built wheels are available for:
+- macOS (x86_64, arm64)
+- Linux (x86_64, aarch64)
+- Windows (x64)
+
+## Usage
+
+### Similarity Join
+
+Find the top-k most similar items from a corpus for each query:
+
+```python
+import polars as pl
+import polars_matmul as pmm
+
+# Query embeddings
+queries = pl.DataFrame({
+    "query_id": [0, 1, 2],
+    "embedding": [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ],
+})
+
+# Corpus to search
+corpus = pl.DataFrame({
+    "corpus_id": [0, 1, 2, 3, 4],
+    "embedding": [
+        [0.9, 0.1, 0.0],
+        [0.1, 0.9, 0.0],
+        [0.0, 0.1, 0.9],
+        [0.5, 0.5, 0.0],
+        [0.0, 0.5, 0.5],
+    ],
+    "label": ["a", "b", "c", "ab", "bc"],
+})
+
+# Find top-2 most similar corpus items for each query
+result = pmm.similarity_join(
+    left=queries,
+    right=corpus,
+    left_on="embedding",
+    right_on="embedding",
+    k=2,
+    metric="cosine",  # or "dot", "euclidean"
+)
+
+print(result)
+# ┌──────────┬───────────┬───────┬──────────┐
+# │ query_id │ corpus_id │ label │ _score   │
+# │ ---      │ ---       │ ---   │ ---      │
+# │ i64      │ i64       │ str   │ f64      │
+# ╞══════════╪═══════════╪═══════╪══════════╡
+# │ 0        │ 0         │ a     │ 0.994... │
+# │ 0        │ 3         │ ab    │ 0.707... │
+# │ 1        │ 1         │ b     │ 0.994... │
+# │ 1        │ 3         │ ab    │ 0.707... │
+# │ 2        │ 2         │ c     │ 0.994... │
+# │ 2        │ 4         │ bc    │ 0.707... │
+# └──────────┴───────────┴───────┴──────────┘
+```
+
+### With LazyFrame
+
+Works seamlessly with LazyFrame:
+
+```python
+result = pmm.similarity_join(
+    left=queries.lazy(),
+    right=corpus.lazy(),
+    left_on="embedding",
+    right_on="embedding",
+    k=10,
+)
+# Returns LazyFrame
+result.collect()
+```
+
+### With Filtering
+
+Pre-filter your corpus before the similarity search:
+
+```python
+result = pmm.similarity_join(
+    left=queries,
+    right=corpus.filter(pl.col("label").is_in(["a", "b"])),
+    left_on="embedding",
+    right_on="embedding",
+    k=5,
+)
+```
+
+### Full Similarity Matrix
+
+For computing all pairwise similarities (without top-k selection):
+
+```python
+# Returns List[f64] for each row - all dot products
+similarities = pmm.matmul(queries["embedding"], corpus["embedding"])
+# similarities[i] contains dot products of query i with all corpus vectors
+```
+
+## Metrics
+
+| Metric | Description | Best for |
+|--------|-------------|----------|
+| `"cosine"` | Cosine similarity (default) | Normalized embeddings, NLP |
+| `"dot"` | Raw dot product | Pre-normalized vectors |
+| `"euclidean"` | Euclidean (L2) distance | Spatial data, clustering |
+
+## Performance
+
+Benchmarks on Apple M1 (using Accelerate framework):
+
+| Query × Corpus × Dim | NumPy | polars-matmul | Ratio |
+|---------------------|-------|---------------|-------|
+| 100 × 2,000 × 100   | 1.85ms | 1.25ms | **0.68x** (faster) |
+| 100 × 2,000 × 1,000 | 5.66ms | 4.19ms | **0.74x** (faster) |
+| 1,000 × 10,000 × 100| 82.13ms | 33.10ms | **0.40x** (2.5x faster) |
+
+> **Note**: polars-matmul can be *faster* than NumPy on Apple Silicon due to optimized Accelerate framework integration.
+
+## Development
+
+```bash
+# Clone and setup
+git clone https://github.com/NivekNey/polars-matmul
+cd polars-matmul
+
+# Create venv and install dev dependencies
+python -m venv .venv
+source .venv/bin/activate
+pip install maturin
+
+# Build and install in development mode
+maturin develop --release
+
+# Run tests
+pip install pytest numpy pyarrow
+pytest tests/
+```
+
+## License
+
+MIT

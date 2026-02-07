@@ -1,0 +1,44 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "polars-matmul"
+requires-python = ">=3.9"
+authors = [
+    { name = "Kevin Yen", email = "kevinyen@gmail.com" }
+]
+description = "BLAS-accelerated similarity joins for Polars"
+readme = "README.md"
+license = { text = "MIT" }
+dynamic = ["version"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering",
+]
+keywords = ["polars", "matrix", "similarity", "blas", "embeddings", "knn"]
+dependencies = [
+    "polars>=0.20.0",
+]
+
+[project.urls]
+Repository = "https://github.com/NivekNey/polars-matmul"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "numpy>=1.24.0",
+    "pyarrow>=14.0.0",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "polars_matmul._polars_matmul"
