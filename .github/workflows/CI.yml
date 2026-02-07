@@ -32,11 +32,11 @@ jobs:
           sccache: 'true'
           manylinux: auto
           before-script-linux: |
-            # Install OpenBLAS development files
+            # Install OpenBLAS, OpenSSL development files and pkg-config
             if command -v yum &> /dev/null; then
-              yum install -y openblas-devel
+              yum install -y openblas-devel openssl-devel pkgconfig perl-IPC-Cmd
             elif command -v apt-get &> /dev/null; then
-              apt-get update && apt-get install -y libopenblas-dev
+              apt-get update && apt-get install -y libopenblas-dev libssl-dev pkg-config
             fi
       - name: Upload wheels
         uses: actions/upload-artifact@v4
