@@ -61,7 +61,10 @@ jobs:
           before-script-linux: |
             # Install OpenBLAS, OpenSSL development files and pkg-config
             if command -v yum &> /dev/null; then
-              yum install -y openblas-devel openssl-devel pkgconfig perl-IPC-Cmd
+              yum install -y epel-release || true
+              yum install -y openblas-devel openssl-devel pkgconfig perl-IPC-Cmd || \
+                yum install -y OpenBLAS-devel openssl-devel pkgconfig perl-IPC-Cmd || \
+                (yum install -y gcc-gfortran && yum install -y openblas-devel openssl-devel pkgconfig perl-IPC-Cmd)
             elif command -v apt-get &> /dev/null; then
               apt-get update && apt-get install -y libopenblas-dev libssl-dev pkg-config
             fi
@@ -87,10 +90,15 @@ jobs:
           echo "VCPKG_ROOT=C:/vcpkg" >> $env:GITHUB_ENV
           vcpkg install openblas:x64-windows
           echo "OPENBLAS_DIR=C:/vcpkg/installed/x64-windows" >> $env:GITHUB_ENV
+          echo "OPENBLAS_LIB_DIR=C:/vcpkg/installed/x64-windows/lib" >> $env:GITHUB_ENV
+          echo "OPENBLAS_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" >> $env:GITHUB_ENV
           echo "LIB=C:/vcpkg/installed/x64-windows/lib;$env:LIB" >> $env:GITHUB_ENV
           echo "PATH=C:/vcpkg/installed/x64-windows/bin;$env:PATH" >> $env:GITHUB_ENV
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          OPENBLAS_LIB_DIR: C:/vcpkg/installed/x64-windows/lib
+          OPENBLAS_INCLUDE_DIR: C:/vcpkg/installed/x64-windows/include
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
@@ -152,8 +160,8 @@ jobs:
           path: dist
       - name: Install and test
         run: |
-          pip install polars-matmul --find-links=dist/ --no-index
           pip install pytest numpy pyarrow polars
+          pip install polars-matmul --find-links=dist/ --no-index
           pytest tests/ -v -s
 
   test-linux-arm64:
@@ -170,8 +178,8 @@ jobs:
           path: dist
       - name: Install and test
         run: |
-          pip install polars-matmul --find-links=dist/ --no-index
           pip install pytest numpy pyarrow polars
+          pip install polars-matmul --find-links=dist/ --no-index
           pytest tests/ -v -s
 
   test-macos:
@@ -188,8 +196,8 @@ jobs:
           path: dist
       - name: Install and test
         run: |
-          pip install polars-matmul --find-links=dist/ --no-index
           pip install pytest numpy pyarrow polars
+          pip install polars-matmul --find-links=dist/ --no-index
           pytest tests/ -v -s
 
   test-windows:
@@ -206,8 +214,8 @@ jobs:
           path: dist
       - name: Install and test
         run: |
-          pip install polars-matmul --find-links=dist/ --no-index
           pip install pytest numpy pyarrow polars
+          pip install polars-matmul --find-links=dist/ --no-index
           pytest tests/ -v -s
 
   release:
