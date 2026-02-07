@@ -82,20 +82,13 @@ jobs:
         with:
           python-version: '3.10'
           architecture: ${{ matrix.target }}
-      - name: Install OpenBLAS
+      - name: Install build dependencies
         run: |
-          echo "VCPKG_ROOT=C:/vcpkg" >> $env:GITHUB_ENV
-          vcpkg install openblas:x64-windows
-          echo "OPENBLAS_DIR=C:/vcpkg/installed/x64-windows" >> $env:GITHUB_ENV
-          echo "OPENBLAS_LIB_DIR=C:/vcpkg/installed/x64-windows/lib" >> $env:GITHUB_ENV
-          echo "OPENBLAS_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" >> $env:GITHUB_ENV
-          echo "LIB=C:/vcpkg/installed/x64-windows/lib;$env:LIB" >> $env:GITHUB_ENV
-          echo "PATH=C:/vcpkg/installed/x64-windows/bin;$env:PATH" >> $env:GITHUB_ENV
+          # Install MinGW with gfortran for building OpenBLAS from source
+          choco install mingw -y
+          echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" >> $env:GITHUB_PATH
       - name: Build wheels
         uses: PyO3/maturin-action@v1
-        env:
-          OPENBLAS_LIB_DIR: C:/vcpkg/installed/x64-windows/lib
-          OPENBLAS_INCLUDE_DIR: C:/vcpkg/installed/x64-windows/include
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
