@@ -26,10 +26,15 @@ ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["accelerate"] }
 accelerate-src = "0.3"
 
-[target.'cfg(not(target_os = "macos"))'.dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["openblas"] }
 openblas-src = { version = "0.10", features = ["cblas", "static"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
+blas-src = { version = "0.10", features = ["openblas"] }
+openblas-src = { version = "0.10", features = ["cblas", "system"] }
 
 [profile.release]
 lto = true
