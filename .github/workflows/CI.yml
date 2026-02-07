@@ -120,51 +120,12 @@ jobs:
         with:
           name: wheels-linux-x86_64
           path: dist
-      - name: Install in clean environment
+      - name: Install and test
         run: |
           uv venv .venv
           source .venv/bin/activate
           uv pip install dist/*.whl pytest numpy pyarrow polars
-      - name: Run tests
-        run: |
-          source .venv/bin/activate
-          pytest tests/ -v
-      - name: Benchmark BLAS performance
-        run: |
-          source .venv/bin/activate
-          python -c "
-          import time
-          import numpy as np
-          import polars_matmul as pmm
-          import polars as pl
-
-          # Generate test data
-          np.random.seed(42)
-          n_queries, n_corpus, dim = 100, 1000, 128
-          queries = np.random.randn(n_queries, dim).astype(np.float64)
-          corpus = np.random.randn(n_corpus, dim).astype(np.float64)
-
-          left = pl.Series('l', queries.tolist())
-          right = pl.Series('r', corpus.tolist())
-
-          # Warmup
-          pmm.matmul(left, right)
-
-          # Benchmark
-          start = time.perf_counter()
-          for _ in range(10):
-              pmm.matmul(left, right)
-          elapsed = (time.perf_counter() - start) / 10
-
-          ops = n_queries * n_corpus * dim * 2  # multiply-add
-          gflops = ops / elapsed / 1e9
-
-          print(f'Matrix: {n_queries}x{dim} @ {n_corpus}x{dim}^T')
-          print(f'Time: {elapsed*1000:.2f}ms, GFLOPS: {gflops:.2f}')
-
-          # Sanity check - should be faster than 100ms for this size
-          assert elapsed < 0.1, f'BLAS may not be working, took {elapsed*1000:.0f}ms'
-          "
+          pytest tests/ -v -s
 
   test-macos:
     runs-on: macos-latest
@@ -176,46 +137,12 @@ jobs:
         with:
           name: wheels-macos-aarch64
           path: dist
-      - name: Install in clean environment
+      - name: Install and test
         run: |
           uv venv .venv
           source .venv/bin/activate
           uv pip install dist/*.whl pytest numpy pyarrow polars
-      - name: Run tests
-        run: |
-          source .venv/bin/activate
-          pytest tests/ -v
-      - name: Benchmark BLAS performance
-        run: |
-          source .venv/bin/activate
-          python -c "
-          import time
-          import numpy as np
-          import polars_matmul as pmm
-          import polars as pl
-
-          np.random.seed(42)
-          n_queries, n_corpus, dim = 100, 1000, 128
-          queries = np.random.randn(n_queries, dim).astype(np.float64)
-          corpus = np.random.randn(n_corpus, dim).astype(np.float64)
-
-          left = pl.Series('l', queries.tolist())
-          right = pl.Series('r', corpus.tolist())
-
-          pmm.matmul(left, right)
-
-          start = time.perf_counter()
-          for _ in range(10):
-              pmm.matmul(left, right)
-          elapsed = (time.perf_counter() - start) / 10
-
-          ops = n_queries * n_corpus * dim * 2
-          gflops = ops / elapsed / 1e9
-
-          print(f'Matrix: {n_queries}x{dim} @ {n_corpus}x{dim}^T')
-          print(f'Time: {elapsed*1000:.2f}ms, GFLOPS: {gflops:.2f}')
-          assert elapsed < 0.1, f'BLAS may not be working, took {elapsed*1000:.0f}ms'
-          "
+          pytest tests/ -v -s
 
   test-windows:
     runs-on: windows-latest
@@ -227,46 +154,12 @@ jobs:
         with:
           name: wheels-windows-x64
           path: dist
-      - name: Install in clean environment
+      - name: Install and test
         run: |
           uv venv .venv
           .venv\Scripts\activate
           uv pip install (Get-ChildItem dist/*.whl) pytest numpy pyarrow polars
-      - name: Run tests
-        run: |
-          .venv\Scripts\activate
-          pytest tests/ -v
-      - name: Benchmark BLAS performance
-        run: |
-          .venv\Scripts\activate
-          python -c @"
-          import time
-          import numpy as np
-          import polars_matmul as pmm
-          import polars as pl
-
-          np.random.seed(42)
-          n_queries, n_corpus, dim = 100, 1000, 128
-          queries = np.random.randn(n_queries, dim).astype(np.float64)
-          corpus = np.random.randn(n_corpus, dim).astype(np.float64)
-
-          left = pl.Series('l', queries.tolist())
-          right = pl.Series('r', corpus.tolist())
-
-          pmm.matmul(left, right)
-
-          start = time.perf_counter()
-          for _ in range(10):
-              pmm.matmul(left, right)
-          elapsed = (time.perf_counter() - start) / 10
-
-          ops = n_queries * n_corpus * dim * 2
-          gflops = ops / elapsed / 1e9
-
-          print(f'Matrix: {n_queries}x{dim} @ {n_corpus}x{dim}^T')
-          print(f'Time: {elapsed*1000:.2f}ms, GFLOPS: {gflops:.2f}')
-          assert elapsed < 0.1, f'BLAS may not be working, took {elapsed*1000:.0f}ms'
-          "@
+          pytest tests/ -v -s
 
   release:
     name: Release
