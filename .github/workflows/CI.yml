@@ -223,17 +223,24 @@ jobs:
   test-windows:
     runs-on: windows-latest
     needs: [windows]
+    env:
+      VCPKG_ROOT: C:\vcpkg
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+      - name: Install OpenBLAS via vcpkg
+        run: |
+          vcpkg install openblas:x64-windows
       - uses: actions/download-artifact@v4
         with:
           name: wheels-windows-x64
           path: dist
       - name: Install and test
         run: |
+          # Add vcpkg bin to PATH for DLL access
+          $env:PATH = "C:\vcpkg\installed\x64-windows\bin;$env:PATH"
           dir dist
           python -c "import sys; print(sys.version); print(sys.platform)"
           pip install pytest numpy pyarrow polars
