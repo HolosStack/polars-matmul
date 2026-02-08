@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "polars-matmul"
 requires-python = ">=3.9"
 authors = [
-    { name = "Kevin Yen", email = "kevinyen@gmail.com" }
+    { name = "Kevin Yen", email = "yenkevin1203@gmail.com" }
 ]
 description = "BLAS-accelerated similarity joins for Polars"
 readme = "README.md"
