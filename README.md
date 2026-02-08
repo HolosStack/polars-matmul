@@ -220,10 +220,11 @@ Compute all pairwise dot products.
 
 | Operation (1000×10000, 256d, k=10) | NumPy | **polars-matmul** | Ratio |
 |-----------------------------------|-------|-------------------|-------|
-| **Top-K Similarity** (End-to-End)  | ~72ms | **~40ms**         | **0.55x** |
-| Raw Matmul (micro-benchmark)| ~5ms  | ~21ms             | 4.20x |
+| **Top-K Similarity** (End-to-End)  | ~72ms | **~44ms**         | **0.60x** |
+| Raw Matmul f32 (micro-benchmark)  | ~5ms  | ~16ms             | 3.0x |
+| Raw Matmul f64 (micro-benchmark)  | ~17ms | ~31ms             | 1.85x |
 
-> **Analysis**: While NumPy is faster at raw matrix multiplication (due to data conversion overhead), `polars-matmul` wins on the end-to-end task by fusing normalization, multiplication, and top-k selection into a single optimized Rust pass.
+> **Analysis**: While NumPy is faster at raw matrix multiplication (due to output conversion overhead), `polars-matmul` wins on the end-to-end task by fusing normalization, multiplication, and top-k selection into a single optimized Rust pass. The f64 path is closer to NumPy performance due to lower relative overhead.
 
 ## Benchmarking
 
@@ -265,9 +266,10 @@ Planned features (contributions welcome!):
 - [x] **Cross-platform** - Pure Rust implementation (via faer) supports Linux, macOS, and Windows
 - [x] **Polars Expression API** - Native `pl.col("embedding").pmm.topk(...)` syntax
 - [x] **Float16 note** - Documented why f16 is not supported (no CPU support, no memory benefit)
-- [ ] **Zero-copy data extraction** - Eliminate data copying from Polars Series to ndarray
-- [ ] **Direct faer views** - Use `faer::mat::from_raw_parts` directly on Polars' memory
-- [ ] **Profiling & hotpath optimization** - Identify and optimize critical path
+- [x] **Zero-copy input extraction** - For Array types, data is read directly without copying
+- [x] **Direct faer views** - Use `faer::mat::from_raw_parts` directly on Polars' memory
+- [x] **Efficient output construction** - Use ListPrimitiveChunkedBuilder for minimal allocations
+- [ ] **Zero-copy output** - Write faer output directly into Arrow buffer (further optimization)
 
 ## License
 
