@@ -16,7 +16,7 @@ def numpy_topk_cosine(query: np.ndarray, corpus: np.ndarray, k: int) -> tuple[np
     corpus_norm = corpus / np.linalg.norm(corpus, axis=1, keepdims=True)
     
     # Matrix multiplication
-    similarities = query_norm @ corpus_norm.T
+    similarities = np.dot(query_norm, corpus_norm.T)
     
     # Top-k selection
     partitioned = np.argpartition(-similarities, k, axis=1)[:, :k]
