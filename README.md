@@ -29,7 +29,8 @@ pip install polars-matmul
 Pre-built wheels are available for:
 - macOS (x86_64, arm64)
 - Linux (x86_64, aarch64)
-- Windows (x64)
+
+> **Note**: Windows is not currently supported due to BLAS linking complexity. Contributions welcome!
 
 ## Usage
 
