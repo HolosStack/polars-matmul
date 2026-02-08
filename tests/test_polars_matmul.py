@@ -200,6 +200,62 @@ class TestMatmul:
         for i in range(10):
             actual = result["scores"][i].to_list()
             np.testing.assert_allclose(actual, expected[i], rtol=1e-5)
+    
+    def test_flatten_mode(self):
+        """Test matmul with flatten=True returns flat array"""
+        df = pl.DataFrame({
+            "embedding": [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+        })
+        corpus_emb = pl.Series("e", [[1.0, 0.0], [0.0, 1.0]])
+        
+        # Flatten mode
+        result = df.select(
+            pl.col("embedding").pmm.matmul(corpus_emb, flatten=True).alias("flat")
+        )
+        
+        # Should have 3 queries * 2 corpus = 6 values
+        assert len(result) == 6
+        assert result["flat"].dtype == pl.Float64
+        
+        # Values should match expected
+        expected = [1.0, 0.0, 0.0, 1.0, 1.0, 1.0]  # row-major order
+        np.testing.assert_allclose(result["flat"].to_list(), expected, rtol=1e-5)
+    
+    def test_list_input_type(self):
+        """Test matmul with List input type"""
+        df = pl.DataFrame({
+            "embedding": [[1.0, 2.0], [3.0, 4.0]]
+        })  # Default is List type
+        corpus_emb = pl.Series("e", [[1.0, 0.0], [0.0, 1.0]])
+        
+        result = df.select(
+            pl.col("embedding").pmm.matmul(corpus_emb).alias("scores")
+        )
+        
+        # Should work with List input
+        assert result["scores"].dtype == pl.Array(pl.Float64, 2)
+        expected = np.dot(np.array([[1.0, 2.0], [3.0, 4.0]]), np.array([[1.0, 0.0], [0.0, 1.0]]).T)
+        for i in range(2):
+            np.testing.assert_allclose(result["scores"][i].to_list(), expected[i], rtol=1e-5)
+    
+    def test_array_input_type(self):
+        """Test matmul with Array input type (optimal performance)"""
+        dim = 4
+        df = pl.DataFrame({
+            "embedding": [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]
+        }).with_columns(pl.col("embedding").cast(pl.Array(pl.Float64, dim)))
+        
+        corpus_emb = pl.Series("e", [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]]).cast(pl.Array(pl.Float64, dim))
+        
+        result = df.select(
+            pl.col("embedding").pmm.matmul(corpus_emb).alias("scores")
+        )
+        
+        # Should work with Array input
+        assert result["scores"].dtype == pl.Array(pl.Float64, 2)
+        expected = np.array([[1.0, 2.0], [5.0, 6.0]])
+        for i in range(2):
+            np.testing.assert_allclose(result["scores"][i].to_list(), expected[i], rtol=1e-5)
 
 
 class TestNumpyEquivalence:

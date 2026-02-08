@@ -121,6 +121,7 @@ class PmmNamespace:
     def matmul(
         self,
         corpus: pl.Series,
+        flatten: bool = False,
     ) -> pl.Expr:
         """
         Compute full matrix multiplication (all pairwise dot products).
@@ -130,19 +131,30 @@ class PmmNamespace:
         
         Args:
             corpus: Series of corpus embeddings (List or Array type)
+            flatten: If True, returns scores as a 1D flat array instead of 
+                per-row arrays. The flat array has shape (n_queries * n_corpus,)
+                in row-major order. Useful for numpy interop.
             
         Returns:
-            Expression evaluating to Array[f64, N] or Array[f32, N] where N = len(corpus)
+            If flatten=False (default):
+                Expression evaluating to Array[f64, N] or Array[f32, N] where N = len(corpus)
+            If flatten=True:
+                Expression evaluating to a single-row Series with all scores flattened
+            
             (dtype is f32 if both inputs are f32, otherwise f64)
             
         Example:
-            >>> # Get all pairwise scores
+            >>> # Get all pairwise scores (default - nested arrays)
             >>> df.with_columns(
             ...     scores=pl.col("embedding").pmm.matmul(corpus["embedding"])
             ... )
-            >>> 
             >>> # Result: each row has an array of len(corpus) scores
             >>> # Access individual scores: df["scores"].arr.get(0)
+            >>>
+            >>> # Flatten mode for numpy interop
+            >>> flat_scores = df.select(
+            ...     pl.col("embedding").pmm.matmul(corpus["embedding"], flatten=True)
+            ... )["embedding"].to_numpy()  # Shape: (n_queries * n_corpus,)
         """
         if isinstance(corpus, pl.Expr):
             raise TypeError(
@@ -150,19 +162,36 @@ class PmmNamespace:
                 "Use corpus['column_name'] or corpus.get_column('column_name')."
             )
 
-        # Output is Array[f32/f64, n_corpus] - fixed size for each row
+        # Determine inner dtype
         n_corpus = len(corpus)
         try:
             inner = corpus.dtype.inner
-            if inner == pl.Float32:
-                dtype = pl.Array(pl.Float32, n_corpus)
-            else:
-                dtype = pl.Array(pl.Float64, n_corpus)
+            is_f32 = inner == pl.Float32
         except:
-            dtype = pl.Array(pl.Float64, n_corpus)
+            is_f32 = False
 
-        return self._expr.map_batches(
-            lambda s: _matmul(s, corpus),
-            is_elementwise=True,
-            return_dtype=dtype,
-        )
+        if flatten:
+            # Flatten mode: return all scores as a 1D array
+            inner_dtype = pl.Float32 if is_f32 else pl.Float64
+            
+            def _matmul_flatten(s: pl.Series) -> pl.Series:
+                result = _matmul(s, corpus)
+                # Flatten the Array column to a single 1D series
+                flat = result.explode()
+                return flat
+            
+            return self._expr.map_batches(
+                _matmul_flatten,
+                is_elementwise=False,  # Output length differs from input
+                return_dtype=inner_dtype,
+            )
+        else:
+            # Default: return Array per row
+            dtype = pl.Array(pl.Float32 if is_f32 else pl.Float64, n_corpus)
+            
+            return self._expr.map_batches(
+                lambda s: _matmul(s, corpus),
+                is_elementwise=True,
+                return_dtype=dtype,
+            )
+

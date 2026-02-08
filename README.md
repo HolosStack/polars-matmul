@@ -205,14 +205,19 @@ Find top-k similar items from corpus for each embedding.
 
 **Returns:** Expression evaluating to `List[Struct{index: u32, score: f64}]`
 
-### `pl.col(...).pmm.matmul(corpus)`
+### `pl.col(...).pmm.matmul(corpus, flatten=False)`
 
 Compute all pairwise dot products.
 
 **Parameters:**
 - `corpus`: `pl.Series` - Corpus embeddings (List or Array type)
+- `flatten`: `bool` - If True, returns flat 1D array instead of per-row arrays (useful for NumPy interop)
 
-**Returns:** Expression evaluating to `Array[f64, N]` or `Array[f32, N]` where N = len(corpus)
+**Returns:** 
+- Default: `Array[f64, N]` or `Array[f32, N]` where N = len(corpus)
+- With `flatten=True`: Flat `Float64` or `Float32` series with all scores
+
+> **Performance Tip:** Use `pl.Array` input type instead of `pl.List` for 2.4x faster matmul (enables zero-copy path).
 
 ## Performance
 
