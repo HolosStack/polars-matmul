@@ -1,3 +1,23 @@
+"""Performance tests for CI - verify performance is acceptable"""
+
+import time
+import numpy as np
+import polars as pl
+import pytest
+
+import polars_matmul as pmm
+
+
+def numpy_matmul(query: np.ndarray, corpus: np.ndarray) -> np.ndarray:
+    """Reference NumPy matrix multiplication."""
+    return query @ corpus.T
+
+
+def polars_matmul(left: pl.Series, right: pl.Series):
+    """polars-matmul matrix multiplication."""
+    return pmm.matmul(left, right)
+
+
 class TestPerformance:
     """Tests to verify performance is within acceptable range of NumPy."""
     

@@ -1,6 +1,6 @@
 # polars-matmul
 
-BLAS-accelerated similarity joins for Polars.
+High-performance similarity joins for Polars.
 
 [![PyPI](https://img.shields.io/pypi/v/polars-matmul.svg)](https://pypi.org/project/polars-matmul/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -19,7 +19,7 @@ This plugin provides efficient matrix multiplication by:
 - Using `faer`, a pure Rust high-performance linear algebra library
 - Avoiding cross-join memory explosion
 - Operating directly on contiguous arrays
-- compiling on all platforms (Linux, macOS, Windows) without complex BLAS dependencies
+- compiling on all platforms (Linux, macOS, Windows) without complex external dependencies
 
 ## Installation
 
