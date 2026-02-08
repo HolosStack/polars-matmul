@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - faer-and-beyond
     tags:
       - '*'
   pull_request:
