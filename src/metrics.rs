@@ -76,7 +76,7 @@ pub fn matmul_f64(query: &Array2<f64>, corpus: &Array2<f64>) -> Array2<f64> {
             rsb, csb,
         );
         
-        let mut dest = from_raw_parts_mut::<f64>(
+        let dest = from_raw_parts_mut::<f64>(
             result.as_mut_ptr(),
             m, n,
             rsc, csc,
@@ -130,7 +130,7 @@ pub fn matmul_f32(query: &Array2<f32>, corpus: &Array2<f32>) -> Array2<f32> {
             rsb, csb,
         );
         
-        let mut dest = from_raw_parts_mut::<f32>(
+        let dest = from_raw_parts_mut::<f32>(
             result.as_mut_ptr(),
             m, n,
             rsc, csc,
