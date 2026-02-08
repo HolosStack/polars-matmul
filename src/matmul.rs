@@ -177,7 +177,7 @@ fn list_chunked_to_matrix_f32(ca: &ListChunked) -> PolarsResult<Array2<f32>> {
 
 /// Compute full matrix multiplication between two Series
 /// 
-/// Automatically uses f32 BLAS operations when input is f32, providing
+/// Automatically uses f32 operations when input is f32, providing
 /// 2x memory efficiency and potentially faster computation.
 pub fn matmul_impl(left: &Series, right: &Series) -> PolarsResult<Series> {
     // Use f32 path if both inputs are f32

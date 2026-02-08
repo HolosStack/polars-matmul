@@ -1,9 +1,7 @@
-//! polars-matmul: BLAS-accelerated similarity joins for Polars
+//! polars-matmul: High-performance similarity joins for Polars
 //!
-//! This crate provides fast similarity search operations using BLAS-accelerated
-//! matrix multiplication.
-
-// BLAS dependencies removed in favor of faer (pure Rust)
+//! This crate provides fast similarity search operations using pure Rust matrix
+//! multiplication (faer).
 
 mod matmul;
 mod metrics;
