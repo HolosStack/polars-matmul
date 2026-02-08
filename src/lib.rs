@@ -25,6 +25,7 @@ use polars::prelude::*;
 /// Perform similarity join between two DataFrames
 #[pyfunction]
 #[pyo3(signature = (left, right, left_on, right_on, k, metric, suffix))]
+#[allow(clippy::too_many_arguments)]
 fn _similarity_join_eager(
     py: Python<'_>,
     left: PyDataFrame,

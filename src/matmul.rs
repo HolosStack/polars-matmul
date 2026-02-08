@@ -107,6 +107,17 @@ pub fn matmul_impl(left: &Series, right: &Series) -> PolarsResult<Series> {
     let left_matrix = series_to_matrix(left)?;
     let right_matrix = series_to_matrix(right)?;
     
+    // Validate dimensions match
+    if left_matrix.ncols() != right_matrix.ncols() {
+        return Err(PolarsError::ComputeError(
+            format!(
+                "Dimension mismatch: left has {} dimensional vectors, right has {} dimensional vectors",
+                left_matrix.ncols(),
+                right_matrix.ncols()
+            ).into()
+        ));
+    }
+    
     // Compute dot products: left @ right^T
     let result = left_matrix.dot(&right_matrix.t());
     
@@ -143,6 +154,17 @@ pub fn similarity_join_impl(
     // Convert to matrices
     let query_matrix = series_to_matrix(left_embeddings.as_materialized_series())?;
     let corpus_matrix = series_to_matrix(right_embeddings.as_materialized_series())?;
+    
+    // Validate dimensions match
+    if query_matrix.ncols() != corpus_matrix.ncols() {
+        return Err(PolarsError::ComputeError(
+            format!(
+                "Dimension mismatch: left has {} dimensional vectors, right has {} dimensional vectors",
+                query_matrix.ncols(),
+                corpus_matrix.ncols()
+            ).into()
+        ));
+    }
     
     let k = k.min(corpus_matrix.nrows());
     
@@ -214,7 +236,7 @@ pub fn similarity_join_impl(
 fn repeat_each(series: &Series, k: usize) -> PolarsResult<Series> {
     let n = series.len();
     let indices: Vec<u32> = (0..n as u32)
-        .flat_map(|i| std::iter::repeat(i).take(k))
+        .flat_map(|i| std::iter::repeat_n(i, k))
         .collect();
     
     let idx_series = Series::new("idx".into(), indices);

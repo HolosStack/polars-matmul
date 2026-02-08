@@ -251,3 +251,189 @@ class TestNumpyEquivalence:
             expected_scores = sorted(expected[i].tolist(), reverse=True)
             actual_sorted = sorted(actual_scores, reverse=True)
             np.testing.assert_allclose(actual_sorted, expected_scores, rtol=1e-5)
+
+
+class TestErrorHandling:
+    """Tests for proper error handling and reporting"""
+    
+    def test_invalid_metric(self):
+        """Test that invalid metric raises a clear error"""
+        queries = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 0.0]],
+        })
+        corpus = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 0.0]],
+        })
+        
+        with pytest.raises(RuntimeError, match="Unknown metric.*invalid_metric"):
+            pmm.similarity_join(
+                left=queries,
+                right=corpus,
+                left_on="embedding",
+                right_on="embedding",
+                k=1,
+                metric="invalid_metric",
+            )
+    
+    def test_missing_left_column(self):
+        """Test error when left_on column doesn't exist"""
+        queries = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 0.0]],
+        })
+        corpus = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 0.0]],
+        })
+        
+        with pytest.raises(Exception):  # Column not found
+            pmm.similarity_join(
+                left=queries,
+                right=corpus,
+                left_on="nonexistent",
+                right_on="embedding",
+                k=1,
+            )
+    
+    def test_missing_right_column(self):
+        """Test error when right_on column doesn't exist"""
+        queries = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 0.0]],
+        })
+        corpus = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 0.0]],
+        })
+        
+        with pytest.raises(Exception):  # Column not found
+            pmm.similarity_join(
+                left=queries,
+                right=corpus,
+                left_on="embedding",
+                right_on="nonexistent",
+                k=1,
+            )
+    
+    def test_empty_query_dataframe(self):
+        """Test error with empty query DataFrame"""
+        queries = pl.DataFrame({
+            "id": [],
+            "embedding": [],
+        }).cast({"embedding": pl.List(pl.Float64)})
+        
+        corpus = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 0.0]],
+        })
+        
+        with pytest.raises(RuntimeError, match="Empty"):
+            pmm.similarity_join(
+                left=queries,
+                right=corpus,
+                left_on="embedding",
+                right_on="embedding",
+                k=1,
+            )
+    
+    def test_empty_corpus_dataframe(self):
+        """Test error with empty corpus DataFrame"""
+        queries = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 0.0]],
+        })
+        
+        corpus = pl.DataFrame({
+            "id": [],
+            "embedding": [],
+        }).cast({"embedding": pl.List(pl.Float64)})
+        
+        with pytest.raises(RuntimeError, match="Empty"):
+            pmm.similarity_join(
+                left=queries,
+                right=corpus,
+                left_on="embedding",
+                right_on="embedding",
+                k=1,
+            )
+    
+    def test_k_zero(self):
+        """Test that k=0 raises ValueError"""
+        queries = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 0.0]],
+        })
+        corpus = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 0.0]],
+        })
+        
+        # k=0 is validated in Python wrapper as invalid
+        with pytest.raises(ValueError, match="k must be positive"):
+            pmm.similarity_join(
+                left=queries,
+                right=corpus,
+                left_on="embedding",
+                right_on="embedding",
+                k=0,
+            )
+    
+    def test_matmul_empty_series(self):
+        """Test matmul with empty series"""
+        left = pl.Series("l", [], dtype=pl.List(pl.Float64))
+        right = pl.Series("r", [[1.0, 0.0]])
+        
+        with pytest.raises(RuntimeError, match="Empty"):
+            pmm.matmul(left, right)
+    
+    def test_matmul_dimension_mismatch(self):
+        """Test matmul with mismatched dimensions raises clear error"""
+        left = pl.Series("l", [[1.0, 2.0]])  # 2D vectors
+        right = pl.Series("r", [[1.0, 2.0, 3.0]])  # 3D vectors
+        
+        with pytest.raises(RuntimeError, match="Dimension mismatch"):
+            pmm.matmul(left, right)
+    
+    def test_similarity_join_dimension_mismatch(self):
+        """Test similarity join with mismatched embedding dimensions"""
+        queries = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 2.0]],  # 2D vectors
+        })
+        corpus = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 2.0, 3.0]],  # 3D vectors
+        })
+        
+        with pytest.raises(RuntimeError, match="Dimension mismatch"):
+            pmm.similarity_join(
+                left=queries,
+                right=corpus,
+                left_on="embedding",
+                right_on="embedding",
+                k=1,
+            )
+    
+    def test_scalar_embedding_column(self):
+        """Test error when embedding column is scalar, not list"""
+        queries = pl.DataFrame({
+            "id": [0],
+            "embedding": [1.0],  # Scalar, not list
+        })
+        corpus = pl.DataFrame({
+            "id": [0],
+            "embedding": [[1.0, 0.0]],
+        })
+        
+        # Scalar columns get treated as 1D vectors, causing dimension mismatch
+        with pytest.raises(RuntimeError, match="Dimension mismatch"):
+            pmm.similarity_join(
+                left=queries,
+                right=corpus,
+                left_on="embedding",
+                right_on="embedding",
+                k=1,
+            )
+
