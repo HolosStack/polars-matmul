@@ -143,11 +143,23 @@ Benchmarks on Apple M1 (using Accelerate framework):
 
 | Query × Corpus × Dim | NumPy | polars-matmul | Ratio |
 |---------------------|-------|---------------|-------|
-| 100 × 2,000 × 100   | 1.85ms | 1.25ms | **0.68x** (faster) |
-| 100 × 2,000 × 1,000 | 5.66ms | 4.19ms | **0.74x** (faster) |
-| 1,000 × 10,000 × 100| 82.13ms | 33.10ms | **0.40x** (2.5x faster) |
+| 100 × 2,000 × 100   | 2.38ms | 1.49ms | **0.63x** (faster) |
+| 100 × 2,000 × 1,000 | 6.00ms | 7.36ms | 1.23x |
+| 1,000 × 10,000 × 100| 81.16ms | 34.13ms | **0.42x** (2.4x faster) |
 
-> **Note**: polars-matmul can be *faster* than NumPy on Apple Silicon due to optimized Accelerate framework integration.
+> **Tip**: For best performance, use `Array[f64, dim]` type instead of `List[f64]`:
+>
+> ```python
+> # Convert List to Array for 3x faster extraction
+> df = df.with_columns(pl.col("embedding").cast(pl.Array(pl.Float64, 128)))
+> ```
+>
+> | Input Type | Time | Overhead |
+> |------------|------|----------|
+> | Array[f64, dim] | 0.21ms | **1.09x** |
+> | List[f64] | 0.68ms | 3.62x |
+>
+> The Array type allows zero-copy extraction since values are stored contiguously.
 
 ## Development
 
