@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark: Similarity Join with Top-K (polars-matmul vs NumPy)
+Benchmark: Similarity Search with Top-K (polars-matmul vs NumPy)
 
 Measures the end-to-end similarity search: normalize, matmul, top-k selection.
 """
@@ -8,7 +8,7 @@ Measures the end-to-end similarity search: normalize, matmul, top-k selection.
 import time
 import numpy as np
 import polars as pl
-import polars_matmul as pmm
+import polars_matmul  # noqa: F401 - registers the .pmm namespace
 
 
 def numpy_topk_cosine(
@@ -46,19 +46,19 @@ def benchmark_numpy(
 
 
 def benchmark_pmm(
-    query_df: pl.DataFrame, corpus_df: pl.DataFrame, k: int, n_runs: int = 5
+    query_df: pl.DataFrame, corpus_emb: pl.Series, k: int, n_runs: int = 5
 ) -> float:
-    """Benchmark polars-matmul similarity join. Returns median time in ms."""
+    """Benchmark polars-matmul topk. Returns median time in ms."""
     times = []
     for _ in range(n_runs):
         start = time.perf_counter()
-        pmm.similarity_join(
-            left=query_df,
-            right=corpus_df,
-            left_on="embedding",
-            right_on="embedding",
-            k=k,
-            metric="cosine",
+        _ = (
+            query_df
+            .with_columns(
+                pl.col("embedding").pmm.topk(corpus_emb, k=k, metric="cosine").alias("m")
+            )
+            .explode("m")
+            .unnest("m")
         )
         times.append((time.perf_counter() - start) * 1000)
     return np.median(times)
@@ -73,24 +73,22 @@ def run_single(n_queries: int, n_corpus: int, dim: int, k: int, dtype) -> dict:
     query_df = pl.DataFrame(
         {"query_id": range(n_queries), "embedding": query_np.tolist()}
     )
-    corpus_df = pl.DataFrame(
-        {"corpus_id": range(n_corpus), "embedding": corpus_np.tolist()}
-    )
+    corpus_emb = pl.Series("embedding", corpus_np.tolist())
 
     # Cast to appropriate dtype
     pl_dtype = pl.Float32 if dtype == np.float32 else pl.Float64
     query_df = query_df.with_columns(pl.col("embedding").cast(pl.List(pl_dtype)))
-    corpus_df = corpus_df.with_columns(pl.col("embedding").cast(pl.List(pl_dtype)))
+    corpus_emb = corpus_emb.cast(pl.List(pl_dtype))
 
     # Warmup
     for _ in range(2):
         numpy_topk_cosine(query_np, corpus_np, k)
-        pmm.similarity_join(
-            query_df, corpus_df, "embedding", "embedding", k=k, metric="cosine"
+        _ = query_df.with_columns(
+            pl.col("embedding").pmm.topk(corpus_emb, k=k, metric="cosine").alias("m")
         )
 
     numpy_time = benchmark_numpy(query_np, corpus_np, k)
-    pmm_time = benchmark_pmm(query_df, corpus_df, k)
+    pmm_time = benchmark_pmm(query_df, corpus_emb, k)
     ratio = pmm_time / numpy_time
 
     return {
@@ -130,9 +128,9 @@ def verify_correctness(
 
     for i in range(n_queries):
         pmm_query = pmm_result.filter(pl.col("query_id") == i).sort(
-            "_score", descending=True
+            "score", descending=True
         )
-        pmm_scores = sorted(pmm_query["_score"].to_list(), reverse=True)
+        pmm_scores = sorted(pmm_query["score"].to_list(), reverse=True)
         np_scores_sorted = sorted(np_scores[i].tolist(), reverse=True)
 
         if not np.allclose(pmm_scores, np_scores_sorted, rtol=1e-4):
@@ -142,7 +140,7 @@ def verify_correctness(
 
 def main():
     print("=" * 90)
-    print("  polars-matmul Benchmark: Similarity Join with Top-K")
+    print("  polars-matmul Benchmark: Top-K Similarity Search")
     print("=" * 90)
 
     # Base configuration
@@ -194,9 +192,12 @@ def main():
     query_np = np.random.randn(100, 64).astype(np.float64)
     corpus_np = np.random.randn(500, 64).astype(np.float64)
     query_df = pl.DataFrame({"query_id": range(100), "embedding": query_np.tolist()})
-    corpus_df = pl.DataFrame({"corpus_id": range(500), "embedding": corpus_np.tolist()})
-    pmm_result = pmm.similarity_join(
-        query_df, corpus_df, "embedding", "embedding", k=10, metric="cosine"
+    corpus_emb = pl.Series("embedding", corpus_np.tolist())
+    pmm_result = (
+        query_df
+        .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=10, metric="cosine").alias("m"))
+        .explode("m")
+        .unnest("m")
     )
     is_correct = verify_correctness(query_np, corpus_np, pmm_result, k=10)
     print(f"  Result: {'✅ PASSED' if is_correct else '❌ FAILED'}")

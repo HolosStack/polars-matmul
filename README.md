@@ -1,6 +1,6 @@
 # polars-matmul
 
-High-performance similarity joins for Polars.
+High-performance similarity search for Polars.
 
 [![PyPI](https://img.shields.io/pypi/v/polars-matmul.svg)](https://pypi.org/project/polars-matmul/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -15,11 +15,11 @@ Computing similarity between embedding vectors in Polars is slow:
 | NumPy matmul + argpartition | ~75ms | ~800MB |
 | **polars-matmul** | **~40ms** | **~160MB** |
 
-This plugin provides efficient matrix multiplication by:
+This plugin provides efficient similarity search by:
 - Using `faer`, a pure Rust high-performance linear algebra library
 - Avoiding cross-join memory explosion
 - Operating directly on contiguous arrays
-- Compiles on all platforms (Linux, macOS, Windows) without complex external dependencies
+- Compiling on all platforms (Linux, macOS, Windows) without complex dependencies
 
 ## Installation
 
@@ -34,15 +34,18 @@ Pre-built wheels are available for:
 
 ## Usage
 
-### Similarity Join
+Import the package to register the `.pmm` namespace on Polars expressions:
+
+```python
+import polars as pl
+import polars_matmul  # registers the .pmm namespace
+```
+
+### Top-K Similarity Search
 
 Find the top-k most similar items from a corpus for each query:
 
 ```python
-import polars as pl
-import polars_matmul as pmm
-
-# Query embeddings
 queries = pl.DataFrame({
     "query_id": [0, 1, 2],
     "embedding": [
@@ -52,7 +55,6 @@ queries = pl.DataFrame({
     ],
 })
 
-# Corpus to search
 corpus = pl.DataFrame({
     "corpus_id": [0, 1, 2, 3, 4],
     "embedding": [
@@ -65,117 +67,77 @@ corpus = pl.DataFrame({
     "label": ["a", "b", "c", "ab", "bc"],
 })
 
-# Find top-2 most similar corpus items for each query
-result = pmm.similarity_join(
-    left=queries,
-    right=corpus,
-    left_on="embedding",
-    right_on="embedding",
-    k=2,
-    metric="cosine",  # or "dot", "euclidean"
+# Find top-2 similar items per query
+result = queries.with_columns(
+    pl.col("embedding").pmm.topk(corpus["embedding"], k=2).alias("matches")
 )
 
 print(result)
-# ┌──────────┬───────────┬───────┬──────────┐
-# │ query_id │ corpus_id │ label │ _score   │
-# │ ---      │ ---       │ ---   │ ---      │
-# │ i64      │ i64       │ str   │ f64      │
-# ╞══════════╪═══════════╪═══════╪══════════╡
-# │ 0        │ 0         │ a     │ 0.994... │
-# │ 0        │ 3         │ ab    │ 0.707... │
-# │ 1        │ 1         │ b     │ 0.994... │
-# │ 1        │ 3         │ ab    │ 0.707... │
-# │ 2        │ 2         │ c     │ 0.994... │
-# │ 2        │ 4         │ bc    │ 0.707... │
-# └──────────┴───────────┴───────┴──────────┘
+# ┌──────────┬─────────────────┬───────────────────────────────┐
+# │ query_id │ embedding       │ matches                       │
+# │ ---      │ ---             │ ---                           │
+# │ i64      │ list[f64]       │ list[struct[2]]               │
+# ╞══════════╪═════════════════╪═══════════════════════════════╡
+# │ 0        │ [1.0, 0.0, 0.0] │ [{0, 0.994...}, {3, 0.707...}]│
+# │ 1        │ [0.0, 1.0, 0.0] │ [{1, 0.994...}, {3, 0.707...}]│
+# │ 2        │ [0.0, 0.0, 1.0] │ [{2, 0.994...}, {4, 0.707...}]│
+# └──────────┴─────────────────┴───────────────────────────────┘
 ```
 
-### With LazyFrame
+### Explode and Join Pattern
 
-Works seamlessly with LazyFrame:
-
-```python
-result = pmm.similarity_join(
-    left=queries.lazy(),
-    right=corpus.lazy(),
-    left_on="embedding",
-    right_on="embedding",
-    k=10,
-)
-# Returns LazyFrame
-result.collect()
-```
-
-### With Filtering
-
-Pre-filter your corpus before the similarity search:
+Flatten the results and join with corpus metadata:
 
 ```python
-result = pmm.similarity_join(
-    left=queries,
-    right=corpus.filter(pl.col("label").is_in(["a", "b"])),
-    left_on="embedding",
-    right_on="embedding",
-    k=5,
+# Explode to get flat results, then join with corpus
+flat_results = (
+    queries
+    .with_columns(
+        pl.col("embedding").pmm.topk(corpus["embedding"], k=2).alias("match")
+    )
+    .explode("match")
+    .unnest("match")
+    .join(corpus.with_row_index("index"), on="index")
 )
+
+print(flat_results)
+# ┌──────────┬───────┬───────────┬───────┐
+# │ query_id │ score │ corpus_id │ label │
+# │ ---      │ ---   │ ---       │ ---   │
+# │ i64      │ f64   │ i64       │ str   │
+# ╞══════════╪═══════╪═══════════╪═══════╡
+# │ 0        │ 0.99  │ 0         │ a     │
+# │ 0        │ 0.71  │ 3         │ ab    │
+# │ 1        │ 0.99  │ 1         │ b     │
+# │ ...      │ ...   │ ...       │ ...   │
+# └──────────┴───────┴───────────┴───────┘
 ```
 
 ### Full Similarity Matrix
 
-For computing all pairwise similarities (without top-k selection):
+Compute all pairwise dot products (no top-k filtering):
 
 ```python
-# Returns List[f64] for each row - all dot products
-similarities = pmm.matmul(queries["embedding"], corpus["embedding"])
-# similarities[i] contains dot products of query i with all corpus vectors
+result = queries.with_columns(
+    pl.col("embedding").pmm.matmul(corpus["embedding"]).alias("scores")
+)
+# Each row has a list of len(corpus) scores
 ```
 
-### Float32 Support
+### Metrics
 
-For 2x memory efficiency, use Float32 embeddings. The library automatically detects the dtype and uses the appropriate routines:
+The `metric` parameter controls the similarity function:
 
 ```python
-# Cast embeddings to f32 for memory efficiency
-queries_f32 = queries.with_columns(
-    pl.col("embedding").cast(pl.List(pl.Float32))
-)
-corpus_f32 = corpus.with_columns(
-    pl.col("embedding").cast(pl.List(pl.Float32))
-)
+# Cosine similarity (default) - best for normalized embeddings
+pl.col("embedding").pmm.topk(corpus_emb, k=5, metric="cosine")
 
-# Works the same way - automatically uses f32
-result = pmm.similarity_join(
-    left=queries_f32,
-    right=corpus_f32,
-    left_on="embedding",
-    right_on="embedding",
-    k=10,
-)
+# Dot product - for pre-normalized vectors
+pl.col("embedding").pmm.topk(corpus_emb, k=5, metric="dot")
 
-# matmul also supports f32 - returns List[f32]
-similarities_f32 = pmm.matmul(queries_f32["embedding"], corpus_f32["embedding"])
+# Euclidean distance - lower is more similar
+pl.col("embedding").pmm.topk(corpus_emb, k=5, metric="euclidean")
 ```
-
-### Batch Processing
-
-For very large corpuses that don't fit in memory, use the `batch_size` parameter to process in chunks:
-
-```python
-# Process 10,000 corpus items at a time
-result = pmm.similarity_join(
-    left=queries,
-    right=large_corpus,  # millions of rows
-    left_on="embedding",
-    right_on="embedding",
-    k=10,
-    batch_size=10000,  # Reduces peak memory usage
-)
-```
-
-The results are automatically merged across batches to give you the global top-k.
-
-
-## Metrics
 
 | Metric | Description | Best for |
 |--------|-------------|----------|
@@ -183,18 +145,27 @@ The results are automatically merged across batches to give you the global top-k
 | `"dot"` | Raw dot product | Pre-normalized vectors |
 | `"euclidean"` | Euclidean (L2) distance | Spatial data, clustering |
 
-## Performance
+### Float32 Support
 
-`polars-matmul` is designed to be significantly faster and more memory-efficient than pure Polars implementations. For end-to-end similarity joins, it even outperforms NumPy by performing the Top-K selection in Rust, avoiding expensive data materialization in Python.
+For 2x memory efficiency, use Float32 embeddings:
 
-| Operation (1000×10000, 256d, k=10) | NumPy | **polars-matmul** | Ratio |
-|-----------------------------------|-------|-------------------|-------|
-| **Similarity Join** (End-to-End)  | ~72ms | **~40ms**         | **0.55x** |
-| Raw Matmul (Series micro-benchmark)| ~5ms  | ~21ms             | 4.20x |
+```python
+# Cast to f32 for memory efficiency
+queries_f32 = queries.with_columns(
+    pl.col("embedding").cast(pl.List(pl.Float32))
+)
+corpus_f32 = corpus.with_columns(
+    pl.col("embedding").cast(pl.List(pl.Float32))
+)
 
-> **Analysis**: While NumPy is faster at raw micro-benchmarks of binary matrix multiplication (due to data conversion overhead), `polars-matmul` wins on the end-to-end task because it fuses normalization, multiplication, and top-k selection into a single optimized Rust pass.
+# Works the same way - automatically uses f32 operations
+result = queries_f32.with_columns(
+    pl.col("embedding").pmm.topk(corpus_f32["embedding"], k=10).alias("matches")
+)
+```
 
 ### Performance Tip: Use Arrays
+
 For best performance, use the `Array[f64, dim]` or `Array[f32, dim]` type instead of `List`. The fixed-width Array type allows for zero-copy buffer extraction:
 
 ```python
@@ -202,15 +173,48 @@ For best performance, use the `Array[f64, dim]` or `Array[f32, dim]` type instea
 df = df.with_columns(pl.col("embedding").cast(pl.Array(pl.Float32, 256)))
 ```
 
+## API Reference
+
+### `pl.col(...).pmm.topk(corpus, k, metric="cosine")`
+
+Find top-k similar items from corpus for each embedding.
+
+**Parameters:**
+- `corpus`: `pl.Series` - Corpus embeddings (List or Array type)
+- `k`: `int` - Number of top matches per query
+- `metric`: `str` - Similarity metric ("cosine", "dot", "euclidean")
+
+**Returns:** Expression evaluating to `List[Struct{index: u32, score: f64}]`
+
+### `pl.col(...).pmm.matmul(corpus)`
+
+Compute all pairwise dot products.
+
+**Parameters:**
+- `corpus`: `pl.Series` - Corpus embeddings (List or Array type)
+
+**Returns:** Expression evaluating to `List[f64]` or `List[f32]`
+
+## Performance
+
+`polars-matmul` is designed to be significantly faster and more memory-efficient than pure Polars implementations. For end-to-end similarity search, it outperforms NumPy by performing the Top-K selection in Rust, avoiding expensive data materialization in Python.
+
+| Operation (1000×10000, 256d, k=10) | NumPy | **polars-matmul** | Ratio |
+|-----------------------------------|-------|-------------------|-------|
+| **Top-K Similarity** (End-to-End)  | ~72ms | **~40ms**         | **0.55x** |
+| Raw Matmul (micro-benchmark)| ~5ms  | ~21ms             | 4.20x |
+
+> **Analysis**: While NumPy is faster at raw matrix multiplication (due to data conversion overhead), `polars-matmul` wins on the end-to-end task by fusing normalization, multiplication, and top-k selection into a single optimized Rust pass.
+
 ## Benchmarking
 
-You can run the systematic benchmarks yourself:
+Run the benchmarks yourself:
 
 ```bash
 # Benchmark raw matrix multiplication (micro-benchmark)
 python examples/benchmark_matmul.py
 
-# Benchmark end-to-end similarity join (primary use case)
+# Benchmark end-to-end similarity search (primary use case)
 python examples/benchmark_topk.py
 ```
 
@@ -239,14 +243,13 @@ pytest tests/
 Planned features (contributions welcome!):
 
 - [x] **Float32 support** - Native f32 operations for 2x memory efficiency
-- [x] **Batch processing** - Chunked computation for large datasets that don't fit in memory
-- [x] **Cross-platform** - Pure Rust implementation (via faer) supports Linux, macOS, and Windows without BLAS complexity
-- [ ] **Zero-copy data extraction** - Eliminate data copying from Polars Series to ndarray (current main bottleneck)
-- [ ] **Direct faer views** - Use `faer::mat::from_raw_parts` directly on Polars' underlying memory to avoid intermediate allocations
-- [ ] **Profiling & hotpath optimization** - Identify and optimize the critical path for ≤10% overhead vs NumPy
-- [ ] **Polars Expression API** - More native `pl.col("embedding").pmm.topk(...)` syntax
+- [x] **Cross-platform** - Pure Rust implementation (via faer) supports Linux, macOS, and Windows
+- [x] **Polars Expression API** - Native `pl.col("embedding").pmm.topk(...)` syntax
+- [ ] **Float16 support** - Support f16 embeddings
+- [ ] **Zero-copy data extraction** - Eliminate data copying from Polars Series to ndarray
+- [ ] **Direct faer views** - Use `faer::mat::from_raw_parts` directly on Polars' memory
+- [ ] **Profiling & hotpath optimization** - Identify and optimize critical path
 
 ## License
 
 MIT
-

@@ -8,7 +8,16 @@ Measures the core matmul operation: Query @ Corpus.T
 import time
 import numpy as np
 import polars as pl
-import polars_matmul as pmm
+import polars_matmul  # noqa: F401 - registers the .pmm namespace
+
+
+def polars_matmul(left: pl.Series, right: pl.Series) -> pl.Series:
+    """polars-matmul matrix multiplication using expression API."""
+    df = pl.DataFrame({"embedding": left})
+    result = df.select(
+        pl.col("embedding").pmm.matmul(right).alias("scores")
+    )
+    return result["scores"]
 
 
 def benchmark_numpy(query: np.ndarray, corpus: np.ndarray, n_runs: int = 10) -> float:
@@ -26,7 +35,7 @@ def benchmark_pmm(left: pl.Series, right: pl.Series, n_runs: int = 10) -> float:
     times = []
     for _ in range(n_runs):
         start = time.perf_counter()
-        _ = pmm.matmul(left, right)
+        _ = polars_matmul(left, right)
         times.append((time.perf_counter() - start) * 1000)
     return np.median(times)
 
@@ -44,7 +53,7 @@ def run_single(n_queries: int, n_corpus: int, dim: int, dtype) -> dict:
     # Warmup
     for _ in range(3):
         np.dot(query_np, corpus_np.T)
-        pmm.matmul(left, right)
+        polars_matmul(left, right)
 
     numpy_time = benchmark_numpy(query_np, corpus_np)
     pmm_time = benchmark_pmm(left, right)

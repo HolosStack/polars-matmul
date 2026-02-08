@@ -1,4 +1,4 @@
-//! Core matrix multiplication and similarity join implementation
+//! Core matrix multiplication and similarity search implementation
 
 use ndarray::Array2;
 use polars::prelude::*;
@@ -247,34 +247,19 @@ fn matmul_impl_f32(left: &Series, right: &Series) -> PolarsResult<Series> {
     Series::new("matmul".into(), lists).cast(&DataType::List(Box::new(DataType::Float32)))
 }
 
-/// Main similarity join implementation
-/// 
-/// Uses f32 operations internally when input is f32 for memory efficiency,
-/// but always returns f64 scores for precision.
-pub fn similarity_join_impl(
-    left: &DataFrame,
-    right: &DataFrame,
-    left_on: &str,
-    right_on: &str,
+/// Helper to compute top-k indices and scores
+fn compute_topk_indices_scores(
+    queries: &Series,
+    corpus: &Series,
     k: usize,
-    metric_str: &str,
-    suffix: &str,
-) -> PolarsResult<DataFrame> {
-    let metric = Metric::from_str(metric_str)
-        .map_err(|e| PolarsError::ComputeError(e.into()))?;
-    
-    let left_embeddings = left.column(left_on)?;
-    let right_embeddings = right.column(right_on)?;
-    
+    metric: Metric,
+) -> PolarsResult<(ndarray::Array2<usize>, Vec<f64>)> {
     // Use f32 path if both inputs are f32
-    let use_f32 = is_f32_series(left_embeddings.as_materialized_series()) 
-        && is_f32_series(right_embeddings.as_materialized_series());
+    let use_f32 = is_f32_series(queries) && is_f32_series(corpus);
     
-    // Compute topk - separate paths for f32 and f64
-    // Both return (indices, scores as f64 Vec for uniform handling)
-    let (topk_indices, topk_scores): (ndarray::Array2<usize>, Vec<f64>) = if use_f32 {
-        let query_matrix = series_to_matrix_f32(left_embeddings.as_materialized_series())?;
-        let corpus_matrix = series_to_matrix_f32(right_embeddings.as_materialized_series())?;
+    if use_f32 {
+        let query_matrix = series_to_matrix_f32(queries)?;
+        let corpus_matrix = series_to_matrix_f32(corpus)?;
         
         if query_matrix.ncols() != corpus_matrix.ncols() {
             return Err(PolarsError::ComputeError(
@@ -291,10 +276,10 @@ pub fn similarity_join_impl(
         let (indices, scores_f32) = select_topk_with_scores_f32(&similarity, k, metric.higher_is_better());
         // Convert f32 scores to f64 Vec for uniform output
         let scores_f64: Vec<f64> = scores_f32.iter().map(|&x| x as f64).collect();
-        (indices, scores_f64)
+        Ok((indices, scores_f64))
     } else {
-        let query_matrix = series_to_matrix(left_embeddings.as_materialized_series())?;
-        let corpus_matrix = series_to_matrix(right_embeddings.as_materialized_series())?;
+        let query_matrix = series_to_matrix(queries)?;
+        let corpus_matrix = series_to_matrix(corpus)?;
         
         if query_matrix.ncols() != corpus_matrix.ncols() {
             return Err(PolarsError::ComputeError(
@@ -310,66 +295,48 @@ pub fn similarity_join_impl(
         let similarity = compute_similarity_matrix(&query_matrix, &corpus_matrix, metric);
         let (indices, scores_f64) = select_topk_with_scores(&similarity, k, metric.higher_is_better());
         let scores_vec: Vec<f64> = scores_f64.iter().copied().collect();
-        (indices, scores_vec)
-    };
-    
-    // Build result DataFrame
-    let left_col_names: Vec<PlSmallStr> = left.get_columns()
-        .iter()
-        .map(|c| c.name().clone())
-        .collect();
-    
-    let k = topk_indices.ncols();
-    
-    let mut all_cols: Vec<Column> = Vec::new();
-    for col in left.get_columns() {
-        let col_name = col.name();
-        if col_name.as_str() == left_on {
-            continue;
-        }
-        let expanded = repeat_each(col.as_materialized_series(), k)?;
-        all_cols.push(expanded.into_column());
+        Ok((indices, scores_vec))
     }
-    
-    let flat_indices: Vec<u32> = topk_indices.iter().map(|&x| x as u32).collect();
-    let indices_series = Series::new("idx".into(), flat_indices);
-    let idx_ca = indices_series.idx()?;
-    
-    for col in right.get_columns() {
-        let col_name = col.name().clone();
-        if col_name.as_str() == right_on {
-            continue;
-        }
-        
-        let gathered = unsafe { col.as_materialized_series().take_unchecked(idx_ca) };
-        
-        let new_name = if left_col_names.contains(&col_name) {
-            PlSmallStr::from(format!("{}{}", col_name, suffix))
-        } else {
-            col_name
-        };
-        
-        all_cols.push(gathered.with_name(new_name).into_column());
-    }
-    
-    // Scores already collected as f64 Vec
-    let score_series = Series::new("_score".into(), topk_scores);
-    all_cols.push(score_series.into_column());
-    
-    DataFrame::new(all_cols)
 }
 
-/// Repeat each element of a Series k times
-fn repeat_each(series: &Series, k: usize) -> PolarsResult<Series> {
-    let n = series.len();
-    let indices: Vec<u32> = (0..n as u32)
-        .flat_map(|i| std::iter::repeat_n(i, k))
-        .collect();
+/// Top-k implementation for Expression API
+/// Returns a Series of List[Struct { index: u32, score: f64 }]
+pub fn topk_impl(
+    queries: &Series,
+    corpus: &Series,
+    k: usize,
+    metric_str: &str,
+) -> PolarsResult<Series> {
+    let metric = Metric::from_str(metric_str)
+        .map_err(|e| PolarsError::ComputeError(e.into()))?;
+        
+    let (indices, scores) = compute_topk_indices_scores(queries, corpus, k, metric)?;
     
-    let idx_series = Series::new("idx".into(), indices);
-    let idx_ca = idx_series.idx()?;
+    let n_queries = indices.nrows();
+    let k_actual = indices.ncols();
     
-    Ok(unsafe { series.take_unchecked(idx_ca) })
+    let mut list_rows_series: Vec<Series> = Vec::with_capacity(n_queries);
+    
+    for i in 0..n_queries {
+        let row_indices_vals = indices.row(i);
+        // Extract scores for this row from the flattened scores vec
+        let row_start = i * k_actual;
+        let row_end = row_start + k_actual;
+        let row_scores_vals = &scores[row_start..row_end];
+        
+        let idx_vec: Vec<u32> = row_indices_vals.iter().map(|&x| x as u32).collect();
+        let score_vec: Vec<f64> = row_scores_vals.into();
+        
+        let s_idx = Series::new("index".into(), idx_vec);
+        let s_score = Series::new("score".into(), score_vec);
+        
+        let struct_df = DataFrame::new(vec![s_idx.into_column(), s_score.into_column()])?;
+        let struct_series = struct_df.into_struct("match".into()).into_series();
+        
+        list_rows_series.push(struct_series);
+    }
+    
+    Ok(Series::new("topk".into(), list_rows_series))
 }
 
 #[cfg(test)]
@@ -404,15 +371,5 @@ mod tests {
         assert_eq!(matrix.ncols(), 3);
         assert!((matrix[[0, 0]] - 1.0).abs() < 1e-5);
         assert!((matrix[[1, 2]] - 6.0).abs() < 1e-5);
-    }
-    
-    #[test]
-    fn test_repeat_each() {
-        let s = Series::new("test".into(), vec![1i32, 2, 3]);
-        let repeated = repeat_each(&s, 2).unwrap();
-        
-        assert_eq!(repeated.len(), 6);
-        let values: Vec<i32> = repeated.i32().unwrap().into_no_null_iter().collect();
-        assert_eq!(values, vec![1, 1, 2, 2, 3, 3]);
     }
 }
