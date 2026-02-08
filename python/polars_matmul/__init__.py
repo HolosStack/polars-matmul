@@ -205,9 +205,9 @@ def topk_search(
     metric: Metric = "cosine",
 ) -> pl.DataFrame:
     """
-    Find top-k similar corpus items for each query (convenience function).
+    Find top-k similar corpus items for each query.
     
-    This is a high-level function that handles the full similarity search workflow:
+    High-level convenience function that handles the full workflow:
     topk -> explode -> unnest -> join with corpus.
     
     Args:
@@ -219,20 +219,23 @@ def topk_search(
         metric: Similarity metric ("cosine", "dot", "euclidean")
         
     Returns:
-        DataFrame with all query columns + "score" + all corpus columns
+        DataFrame with query columns + "score" + corpus columns
         (one row per query-corpus match)
         
     Example:
         >>> from polars_matmul import topk_search
         >>> 
         >>> results = topk_search(queries, corpus, k=5)
-        >>> # Returns flat DataFrame ready for analysis:
-        >>> # query_id | score | corpus_id | label | ...
+        >>> 
+        >>> # Compose with standard Polars operations:
+        >>> results = (
+        ...     topk_search(queries.filter(pl.col("active")), corpus, k=10)
+        ...     .filter(pl.col("score") > 0.8)
+        ...     .select(["query_id", "score", "corpus_id"])
+        ... )
     """
-    # Get the corpus embedding series
     corpus_emb = corpus[corpus_col]
     
-    # Run topk, explode, unnest
     result = (
         queries
         .with_columns(
@@ -242,12 +245,10 @@ def topk_search(
         .unnest("_pmm_match")
     )
     
-    # Prepare corpus for join (add index, drop embedding col to avoid collision)
+    # Join with corpus (drop embedding to avoid collision)
     corpus_for_join = corpus.with_row_index("index")
     if corpus_col in corpus_for_join.columns:
         corpus_for_join = corpus_for_join.drop(corpus_col)
     
-    # Join and clean up
-    result = result.join(corpus_for_join, on="index").drop("index")
-    
-    return result
+    return result.join(corpus_for_join, on="index").drop("index")
+
