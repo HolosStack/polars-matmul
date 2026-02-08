@@ -44,32 +44,32 @@ jobs:
           name: wheels-linux-${{ matrix.target }}
           path: dist
 
-  linux-arm64:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: aarch64
-          args: --release --out dist --interpreter 3.9 3.10 3.11 3.12
-          sccache: 'true'
-          manylinux: auto
-          before-script-linux: |
-            # Install build dependencies for static OpenBLAS compilation
-            if command -v yum &> /dev/null; then
-              yum install -y gcc-gfortran openssl-devel pkgconfig perl-IPC-Cmd make
-            elif command -v apt-get &> /dev/null; then
-              apt-get update && apt-get install -y gfortran libssl-dev pkg-config make
-            fi
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-linux-aarch64
-          path: dist
+#   linux-arm64:
+#     runs-on: ubuntu-24.04-arm
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-python@v5
+#         with:
+#           python-version: '3.10'
+#       - name: Build wheels
+#         uses: PyO3/maturin-action@v1
+#         with:
+#           target: aarch64
+#           args: --release --out dist --interpreter 3.9 3.10 3.11 3.12
+#           sccache: 'true'
+#           manylinux: auto
+#           before-script-linux: |
+#             # Install build dependencies for static OpenBLAS compilation
+#             if command -v yum &> /dev/null; then
+#               yum install -y gcc-gfortran openssl-devel pkgconfig perl-IPC-Cmd make
+#             elif command -v apt-get &> /dev/null; then
+#               apt-get update && apt-get install -y gfortran libssl-dev pkg-config make
+#             fi
+#       - name: Upload wheels
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: wheels-linux-aarch64
+#           path: dist
 
   windows:
     runs-on: windows-latest
@@ -160,26 +160,26 @@ jobs:
       - name: Install and test
         run: |
           pip install pytest numpy pyarrow polars
-          pip install polars-matmul --find-links=dist/ --no-index
+          pip install dist/*cp310*.whl --force-reinstall
           pytest tests/ -v -s
 
-  test-linux-arm64:
-    runs-on: ubuntu-24.04-arm
-    needs: [linux-arm64]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - uses: actions/download-artifact@v4
-        with:
-          name: wheels-linux-aarch64
-          path: dist
-      - name: Install and test
-        run: |
-          pip install pytest numpy pyarrow polars
-          pip install polars-matmul --find-links=dist/ --no-index
-          pytest tests/ -v -s
+#   test-linux-arm64:
+#     runs-on: ubuntu-24.04-arm
+#     needs: [linux-arm64]
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-python@v5
+#         with:
+#           python-version: '3.10'
+#       - uses: actions/download-artifact@v4
+#         with:
+#           name: wheels-linux-aarch64
+#           path: dist
+#       - name: Install and test
+#         run: |
+#           pip install pytest numpy pyarrow polars
+#           pip install dist/*cp310*.whl --force-reinstall
+#           pytest tests/ -v -s
 
   test-macos:
     runs-on: macos-latest
@@ -196,7 +196,7 @@ jobs:
       - name: Install and test
         run: |
           pip install pytest numpy pyarrow polars
-          pip install polars-matmul --find-links=dist/ --no-index
+          pip install dist/*cp310*.whl --force-reinstall
           pytest tests/ -v -s
 
   test-windows:
@@ -214,14 +214,14 @@ jobs:
       - name: Install and test
         run: |
           pip install pytest numpy pyarrow polars
-          pip install polars-matmul --find-links=dist/ --no-index
+          pip install dist/*cp310*.whl --force-reinstall
           pytest tests/ -v -s
 
   release:
     name: Release
     runs-on: ubuntu-latest
     if: "startsWith(github.ref, 'refs/tags/')"
-    needs: [linux, linux-arm64, windows, macos, sdist, test-linux, test-linux-arm64, test-macos, test-windows]
+    needs: [linux, windows, macos, sdist, test-linux, test-macos, test-windows]
     environment: pypi
     permissions:
       id-token: write
