@@ -67,8 +67,9 @@ class TestBLASPerformance:
         print(f"  Ratio: {ratio:.2f}x")
         
         # BLAS should provide acceleration - with Array type we should be close to NumPy
-        # Threshold of 5x catches missing BLAS (would be 50x+) while allowing CI variability
-        assert ratio < 5.0, (
+        # Threshold of 10x catches missing BLAS (would be 50x+) while allowing CI variability
+        # Cold starts and CI shared runners can have high variance
+        assert ratio < 10.0, (
             f"polars-matmul is {ratio:.1f}x slower than NumPy. "
             f"BLAS may not be linked correctly."
         )

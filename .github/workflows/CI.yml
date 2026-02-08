@@ -16,6 +16,7 @@ permissions:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         target: [x86_64]
@@ -84,40 +85,32 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         target: [x64]
-    env:
-      VCPKG_ROOT: C:\vcpkg
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           architecture: ${{ matrix.target }}
-      - name: Cache vcpkg
-        id: cache-vcpkg
-        uses: actions/cache@v4
-        with:
-          path: C:\vcpkg\installed
-          key: vcpkg-openblas-${{ matrix.target }}-${{ hashFiles('Cargo.toml') }}
-          restore-keys: |
-            vcpkg-openblas-${{ matrix.target }}-
-      - name: Install Static OpenBLAS via vcpkg
-        if: steps.cache-vcpkg.outputs.cache-hit != 'true'
+      - name: Download OpenBLAS
+        shell: pwsh
         run: |
-          vcpkg install openblas:x64-windows-static
-          echo "OPENBLAS_DIR=C:/vcpkg/installed/x64-windows-static" >> $env:GITHUB_ENV
-          echo "OPENBLAS_LIB_DIR=C:/vcpkg/installed/x64-windows-static/lib" >> $env:GITHUB_ENV
-          echo "OPENBLAS_INCLUDE_DIR=C:/vcpkg/installed/x64-windows-static/include" >> $env:GITHUB_ENV
-          echo "OPENBLAS_STATIC=1" >> $env:GITHUB_ENV
+          # Download pre-built OpenBLAS release (much faster than vcpkg)
+          $version = "0.3.28"
+          $url = "https://github.com/OpenMathLib/OpenBLAS/releases/download/v${version}/OpenBLAS-${version}-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile openblas.zip
+          Expand-Archive -Path openblas.zip -DestinationPath C:\openblas
+          
+          # List contents for debugging
+          Get-ChildItem -Recurse C:\openblas | Select-Object FullName
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         env:
-          OPENBLAS_DIR: C:/vcpkg/installed/x64-windows-static
-          OPENBLAS_LIB_DIR: C:/vcpkg/installed/x64-windows-static/lib
-          OPENBLAS_INCLUDE_DIR: C:/vcpkg/installed/x64-windows-static/include
-          OPENBLAS_STATIC: 1
+          # Point openblas-src to the downloaded binaries
+          OPENBLAS_PATH: C:\openblas
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
@@ -130,6 +123,7 @@ jobs:
 
   macos:
     runs-on: macos-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         target: [x86_64, aarch64]

@@ -42,3 +42,10 @@ test = [
 features = ["pyo3/extension-module"]
 python-source = "python"
 module-name = "polars_matmul._polars_matmul"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::RuntimeWarning",
+]
+
