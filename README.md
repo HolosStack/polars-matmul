@@ -164,6 +164,25 @@ result = queries_f32.with_columns(
 )
 ```
 
+### A Note on Float16
+
+Float16 (`pl.Float16`) is **not supported** by polars-matmul. Here's why:
+
+1. **No native CPU support** - Most CPUs lack f16 arithmetic, requiring conversion to f32 for all operations
+2. **No memory benefit** - Since we must convert to f32 before computation, peak memory usage is identical to f32
+3. **Polars marks Float16 as unstable** - The Polars team recommends casting to Float32 before computation
+
+**Recommendation:** If your embeddings are stored as Float16 (e.g., in Parquet), cast them to Float32 when loading:
+
+```python
+# Load Float16 embeddings and convert to Float32 for computation
+df = pl.read_parquet("embeddings.parquet").with_columns(
+    pl.col("embedding").cast(pl.List(pl.Float32))
+)
+```
+
+Float16 is excellent for *storage* (2x smaller files), but Float32 is optimal for *computation*.
+
 ### Performance Tip: Use Arrays
 
 For best performance, use the `Array[f64, dim]` or `Array[f32, dim]` type instead of `List`. The fixed-width Array type allows for zero-copy buffer extraction:
@@ -245,7 +264,7 @@ Planned features (contributions welcome!):
 - [x] **Float32 support** - Native f32 operations for 2x memory efficiency
 - [x] **Cross-platform** - Pure Rust implementation (via faer) supports Linux, macOS, and Windows
 - [x] **Polars Expression API** - Native `pl.col("embedding").pmm.topk(...)` syntax
-- [ ] **Float16 support** - Support f16 embeddings
+- [x] **Float16 note** - Documented why f16 is not supported (no CPU support, no memory benefit)
 - [ ] **Zero-copy data extraction** - Eliminate data copying from Polars Series to ndarray
 - [ ] **Direct faer views** - Use `faer::mat::from_raw_parts` directly on Polars' memory
 - [ ] **Profiling & hotpath optimization** - Identify and optimize critical path
