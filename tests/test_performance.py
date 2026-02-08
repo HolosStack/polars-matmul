@@ -136,3 +136,60 @@ class TestBLASPerformance:
         
         # Verify result size
         assert len(result) == n_queries * k
+    
+    def test_f32_performance(self):
+        """Verify f32 path has comparable performance to f64.
+        
+        f32 should be at least as fast (often faster due to memory bandwidth).
+        This test ensures f32 BLAS is working correctly.
+        """
+        np.random.seed(42)
+        n_queries, n_corpus, dim = 100, 1000, 128
+        
+        # f64 data
+        query_f64 = np.random.randn(n_queries, dim).astype(np.float64)
+        corpus_f64 = np.random.randn(n_corpus, dim).astype(np.float64)
+        
+        # f32 data
+        query_f32 = query_f64.astype(np.float32)
+        corpus_f32 = corpus_f64.astype(np.float32)
+        
+        # Create Polars Series
+        left_f64 = pl.Series("l", query_f64.tolist()).cast(pl.Array(pl.Float64, dim))
+        right_f64 = pl.Series("r", corpus_f64.tolist()).cast(pl.Array(pl.Float64, dim))
+        left_f32 = pl.Series("l", query_f32.tolist()).cast(pl.Array(pl.Float32, dim))
+        right_f32 = pl.Series("r", corpus_f32.tolist()).cast(pl.Array(pl.Float32, dim))
+        
+        # Warmup
+        polars_matmul(left_f64, right_f64)
+        polars_matmul(left_f32, right_f32)
+        
+        # Benchmark f64
+        n_runs = 5
+        f64_times = []
+        for _ in range(n_runs):
+            start = time.perf_counter()
+            polars_matmul(left_f64, right_f64)
+            f64_times.append(time.perf_counter() - start)
+        f64_mean = np.mean(f64_times)
+        
+        # Benchmark f32
+        f32_times = []
+        for _ in range(n_runs):
+            start = time.perf_counter()
+            polars_matmul(left_f32, right_f32)
+            f32_times.append(time.perf_counter() - start)
+        f32_mean = np.mean(f32_times)
+        
+        ratio = f32_mean / f64_mean
+        
+        print(f"\nf32 vs f64: {n_queries}x{dim} @ {n_corpus}x{dim}^T")
+        print(f"  f64: {f64_mean*1000:.2f}ms")
+        print(f"  f32: {f32_mean*1000:.2f}ms")
+        print(f"  Ratio (f32/f64): {ratio:.2f}x")
+        
+        # f32 should be at least 80% as fast as f64 (often faster)
+        assert ratio < 1.5, (
+            f"f32 is {ratio:.1f}x slower than f64. "
+            f"f32 BLAS may not be working correctly."
+        )

@@ -130,6 +130,32 @@ similarities = pmm.matmul(queries["embedding"], corpus["embedding"])
 # similarities[i] contains dot products of query i with all corpus vectors
 ```
 
+### Float32 Support
+
+For 2x memory efficiency, use Float32 embeddings. The library automatically detects the dtype and uses the appropriate BLAS routines (sgemm for f32, dgemm for f64):
+
+```python
+# Cast embeddings to f32 for memory efficiency
+queries_f32 = queries.with_columns(
+    pl.col("embedding").cast(pl.List(pl.Float32))
+)
+corpus_f32 = corpus.with_columns(
+    pl.col("embedding").cast(pl.List(pl.Float32))
+)
+
+# Works the same way - automatically uses f32 BLAS
+result = pmm.similarity_join(
+    left=queries_f32,
+    right=corpus_f32,
+    left_on="embedding",
+    right_on="embedding",
+    k=10,
+)
+
+# matmul also supports f32 - returns List[f32]
+similarities_f32 = pmm.matmul(queries_f32["embedding"], corpus_f32["embedding"])
+```
+
 ## Metrics
 
 | Metric | Description | Best for |
@@ -182,6 +208,16 @@ pip install pytest numpy pyarrow
 pytest tests/
 ```
 
+## Roadmap
+
+Planned features (contributions welcome!):
+
+- [x] **Float32 support** - Native f32 operations for 2x memory efficiency
+- [ ] **Batch processing** - Chunked computation for large datasets that don't fit in memory
+- [ ] **Polars Expression API** - More native `pl.col("embedding").pmm.topk(...)` syntax
+- [ ] **Windows support** - Pre-built wheels for Windows (blocked by BLAS linking complexity)
+
 ## License
 
 MIT
+

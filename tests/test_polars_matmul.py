@@ -437,3 +437,96 @@ class TestErrorHandling:
                 k=1,
             )
 
+
+class TestFloat32Support:
+    """Tests for Float32 support - 2x memory efficiency"""
+    
+    def test_matmul_f32(self):
+        """Test matmul with f32 input returns f32 output"""
+        left = pl.Series("l", [[1.0, 2.0], [3.0, 4.0]]).cast(pl.List(pl.Float32))
+        right = pl.Series("r", [[1.0, 0.0], [0.0, 1.0]]).cast(pl.List(pl.Float32))
+        
+        result = pmm.matmul(left, right)
+        
+        # Result should be List[f32]
+        assert result.dtype == pl.List(pl.Float32)
+        
+        # Check values
+        expected = np.array([[1.0, 2.0], [3.0, 4.0]]) @ np.array([[1.0, 0.0], [0.0, 1.0]]).T
+        for i in range(2):
+            np.testing.assert_allclose(result[i].to_list(), expected[i], rtol=1e-5)
+    
+    def test_matmul_f64(self):
+        """Test matmul with f64 input returns f64 output"""
+        left = pl.Series("l", [[1.0, 2.0], [3.0, 4.0]])  # Default is f64
+        right = pl.Series("r", [[1.0, 0.0], [0.0, 1.0]])
+        
+        result = pmm.matmul(left, right)
+        
+        # Result should be List[f64]
+        assert result.dtype == pl.List(pl.Float64)
+    
+    def test_similarity_join_f32(self):
+        """Test similarity join with f32 embeddings"""
+        np.random.seed(42)
+        dim = 32
+        
+        queries = pl.DataFrame({
+            "query_id": [0, 1],
+            "embedding": [
+                [float(x) for x in np.random.randn(dim)],
+                [float(x) for x in np.random.randn(dim)],
+            ],
+        }).with_columns(
+            pl.col("embedding").cast(pl.List(pl.Float32))
+        )
+        
+        corpus = pl.DataFrame({
+            "corpus_id": [0, 1, 2],
+            "embedding": [
+                [float(x) for x in np.random.randn(dim)],
+                [float(x) for x in np.random.randn(dim)],
+                [float(x) for x in np.random.randn(dim)],
+            ],
+        }).with_columns(
+            pl.col("embedding").cast(pl.List(pl.Float32))
+        )
+        
+        result = pmm.similarity_join(
+            left=queries,
+            right=corpus,
+            left_on="embedding",
+            right_on="embedding",
+            k=2,
+            metric="cosine",
+        )
+        
+        # Should work and return results
+        assert len(result) == 4  # 2 queries × 2 top-k
+        assert "_score" in result.columns
+        
+        # Scores should be in valid range for cosine
+        scores = result["_score"].to_list()
+        assert all(-1.01 <= s <= 1.01 for s in scores)
+    
+    def test_mixed_f32_f64_uses_f64(self):
+        """Test that mixed f32/f64 inputs fall back to f64"""
+        left = pl.Series("l", [[1.0, 2.0]]).cast(pl.List(pl.Float32))
+        right = pl.Series("r", [[1.0, 0.0]])  # f64
+        
+        result = pmm.matmul(left, right)
+        
+        # Mixed types should use f64 path
+        assert result.dtype == pl.List(pl.Float64)
+    
+    def test_f32_array_type(self):
+        """Test f32 with fixed-size Array type for optimal performance"""
+        dim = 8
+        left = pl.Series("l", [[1.0] * dim, [2.0] * dim]).cast(pl.Array(pl.Float32, dim))
+        right = pl.Series("r", [[1.0] * dim, [0.5] * dim]).cast(pl.Array(pl.Float32, dim))
+        
+        result = pmm.matmul(left, right)
+        
+        # Should work with Array type
+        assert result.dtype == pl.List(pl.Float32)
+        assert len(result) == 2
