@@ -6,11 +6,71 @@ use crate::metrics::{Metric, compute_similarity_matrix};
 use crate::topk::select_topk_with_scores;
 
 /// Convert a Polars Series of List/Array to an ndarray matrix
+/// 
+/// Optimized for fixed-size arrays (Array[f64, dim]) where we can extract
+/// the contiguous buffer directly, avoiding O(n*d) element-by-element iteration.
 pub fn series_to_matrix(series: &Series) -> PolarsResult<Array2<f64>> {
-    // Handle both List and Array types
+    let n_rows = series.len();
+    if n_rows == 0 {
+        return Err(PolarsError::ComputeError("Empty series".into()));
+    }
+    
+    // Try fast path for fixed-size arrays first
+    if let Ok(arr_chunked) = series.array() {
+        return array_chunked_to_matrix(arr_chunked);
+    }
+    
+    // Fall back to List type handling
     let series = series.cast(&DataType::List(Box::new(DataType::Float64)))?;
     let ca = series.list()?;
+    list_chunked_to_matrix(ca)
+}
+
+/// Fast path: Convert ArrayChunked (fixed-size array) to ndarray matrix
+/// 
+/// Fixed-size arrays store all values contiguously, so we can extract them
+/// in bulk using get_inner() and reshape, avoiding element-by-element iteration.
+fn array_chunked_to_matrix(arr: &ArrayChunked) -> PolarsResult<Array2<f64>> {
+    let n_rows = arr.len();
+    if n_rows == 0 {
+        return Err(PolarsError::ComputeError("Empty series".into()));
+    }
     
+    let dim = arr.width();
+    if dim == 0 {
+        return Err(PolarsError::ComputeError("Zero-dimensional vectors".into()));
+    }
+    
+    // Get inner values as a flat Series - this is the contiguous buffer!
+    let inner = arr.get_inner();
+    
+    // Cast to f64 if needed and get contiguous slice
+    let inner_f64 = inner.cast(&DataType::Float64)?;
+    let ca_f64 = inner_f64.f64()?;
+    
+    // Try to get contiguous slice (fast path - single chunk, no nulls)
+    if let Ok(slice) = ca_f64.cont_slice() {
+        // Direct reshape from contiguous memory
+        let matrix = Array2::from_shape_vec((n_rows, dim), slice.to_vec())
+            .map_err(|e| PolarsError::ComputeError(format!("Shape error: {}", e).into()))?;
+        return Ok(matrix);
+    }
+    
+    // Fallback: handle multiple chunks or nulls
+    let mut matrix = Array2::zeros((n_rows, dim));
+    for (idx, val) in ca_f64.iter().enumerate() {
+        let row = idx / dim;
+        let col = idx % dim;
+        matrix[[row, col]] = val.unwrap_or(0.0);
+    }
+    
+    Ok(matrix)
+}
+
+/// Slow path: Convert ListChunked (variable-size list) to ndarray matrix
+/// 
+/// Lists are not guaranteed to be contiguous, so we iterate row by row.
+fn list_chunked_to_matrix(ca: &ListChunked) -> PolarsResult<Array2<f64>> {
     let n_rows = ca.len();
     if n_rows == 0 {
         return Err(PolarsError::ComputeError("Empty series".into()));
