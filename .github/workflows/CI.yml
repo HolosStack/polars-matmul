@@ -41,6 +41,7 @@ jobs:
           before-script-linux: |
             # Install build dependencies for static OpenBLAS compilation
             if command -v yum &> /dev/null; then
+              yum install -y epel-release || true
               yum install -y gcc-gfortran openssl-devel pkgconfig perl-IPC-Cmd make
             elif command -v apt-get &> /dev/null; then
               apt-get update && apt-get install -y gfortran libssl-dev pkg-config make
