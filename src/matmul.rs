@@ -296,6 +296,17 @@ fn list_chunked_to_matrix_f32(ca: &ListChunked) -> PolarsResult<Array2<f32>> {
 /// Uses zero-copy path when data is contiguous (Array type), 
 /// falls back to copying for List type.
 pub fn matmul_impl(left: &Series, right: &Series) -> PolarsResult<Series> {
+    // Handle empty left series - return empty result with correct type
+    if left.len() == 0 {
+        let inner_dtype = if is_f32_series(left) && is_f32_series(right) {
+            DataType::Float32
+        } else {
+            DataType::Float64
+        };
+        let empty_series = Series::new_empty("matmul".into(), &DataType::List(Box::new(inner_dtype)));
+        return Ok(empty_series);
+    }
+    
     // Use f32 path if both inputs are f32
     let use_f32 = is_f32_series(left) && is_f32_series(right);
     
@@ -470,6 +481,16 @@ pub fn topk_impl(
     k: usize,
     metric_str: &str,
 ) -> PolarsResult<Series> {
+    // Handle empty queries - return empty series with correct type
+    if queries.len() == 0 {
+        let struct_dtype = DataType::Struct(vec![
+            Field::new("index".into(), DataType::UInt32),
+            Field::new("score".into(), DataType::Float64),
+        ]);
+        let empty_series = Series::new_empty("topk".into(), &DataType::List(Box::new(struct_dtype)));
+        return Ok(empty_series);
+    }
+    
     let metric = Metric::from_str(metric_str)
         .map_err(|e| PolarsError::ComputeError(e.into()))?;
         

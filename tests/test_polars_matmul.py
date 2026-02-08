@@ -263,17 +263,18 @@ class TestErrorHandling:
             )
     
     def test_empty_query(self):
-        """Test error with empty query DataFrame"""
+        """Test that empty query DataFrame returns empty result (not an error)"""
         df = pl.DataFrame({
             "embedding": [],
         }).cast({"embedding": pl.List(pl.Float64)})
         
         corpus_emb = pl.Series("e", [[1.0, 0.0]])
         
-        with pytest.raises(Exception, match="Empty"):
-            df.select(
-                pl.col("embedding").pmm.topk(corpus_emb, k=1)
-            )
+        # Empty queries should return empty result, not raise an error
+        result = df.select(
+            pl.col("embedding").pmm.topk(corpus_emb, k=1)
+        )
+        assert len(result) == 0
     
     def test_empty_corpus(self):
         """Test error with empty corpus Series"""
@@ -405,3 +406,308 @@ class TestFloat32Support:
         # Should work with Array type
         assert result["scores"].dtype == pl.List(pl.Float32)
         assert len(result) == 2
+
+
+class TestLazyFrameEdgeCases:
+    """Tests for LazyFrame usage and edge cases to ensure optimization doesn't break"""
+    
+    def test_lazy_basic_topk(self):
+        """Test basic lazy evaluation with topk"""
+        queries = pl.LazyFrame({
+            "query_id": [0, 1, 2],
+            "embedding": [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]],
+        })
+        
+        corpus_emb = pl.Series("e", [[1.0, 0.0], [0.0, 1.0]])
+        
+        result = (
+            queries
+            .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=2).alias("matches"))
+            .collect()
+        )
+        
+        assert len(result) == 3
+        assert "matches" in result.columns
+    
+    def test_lazy_with_filter_before(self):
+        """Test filter before pmm operation"""
+        queries = pl.LazyFrame({
+            "query_id": [0, 1, 2, 3],
+            "embedding": [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5], [1.0, 1.0]],
+            "active": [True, False, True, True],
+        })
+        
+        corpus_emb = pl.Series("e", [[1.0, 0.0], [0.0, 1.0]])
+        
+        result = (
+            queries
+            .filter(pl.col("active"))
+            .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=1).alias("matches"))
+            .collect()
+        )
+        
+        # Only active queries should be processed
+        assert len(result) == 3
+        assert 1 not in result["query_id"].to_list()
+    
+    def test_lazy_with_filter_after(self):
+        """Test filter after pmm operation"""
+        queries = pl.LazyFrame({
+            "query_id": [0, 1, 2],
+            "embedding": [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]],
+        })
+        
+        corpus_emb = pl.Series("e", [[1.0, 0.0], [0.0, 1.0]])
+        
+        result = (
+            queries
+            .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=2).alias("matches"))
+            .filter(pl.col("query_id") > 0)
+            .collect()
+        )
+        
+        # Only query_id > 0 should remain
+        assert len(result) == 2
+        assert 0 not in result["query_id"].to_list()
+    
+    def test_lazy_with_select(self):
+        """Test select with pmm to only keep specific columns"""
+        queries = pl.LazyFrame({
+            "query_id": [0, 1],
+            "embedding": [[1.0, 0.0], [0.0, 1.0]],
+            "metadata": ["a", "b"],
+        })
+        
+        corpus_emb = pl.Series("e", [[1.0, 0.0], [0.0, 1.0]])
+        
+        result = (
+            queries
+            .select([
+                pl.col("query_id"),
+                pl.col("embedding").pmm.topk(corpus_emb, k=1).alias("top_match"),
+            ])
+            .collect()
+        )
+        
+        assert result.columns == ["query_id", "top_match"]
+        assert "metadata" not in result.columns
+    
+    def test_lazy_multiple_pmm_operations(self):
+        """Test multiple pmm operations in same query"""
+        queries = pl.LazyFrame({
+            "query_id": [0, 1],
+            "embedding": [[1.0, 0.0], [0.0, 1.0]],
+        })
+        
+        corpus1 = pl.Series("c1", [[1.0, 0.0], [0.0, 1.0]])
+        corpus2 = pl.Series("c2", [[0.5, 0.5], [1.0, 1.0]])
+        
+        result = (
+            queries
+            .with_columns([
+                pl.col("embedding").pmm.topk(corpus1, k=1).alias("matches_corpus1"),
+                pl.col("embedding").pmm.topk(corpus2, k=1).alias("matches_corpus2"),
+            ])
+            .collect()
+        )
+        
+        assert "matches_corpus1" in result.columns
+        assert "matches_corpus2" in result.columns
+        assert len(result) == 2
+    
+    def test_lazy_explode_unnest_chain(self):
+        """Test lazy explode and unnest chain"""
+        queries = pl.LazyFrame({
+            "query_id": [0, 1],
+            "embedding": [[1.0, 0.0], [0.0, 1.0]],
+        })
+        
+        corpus_emb = pl.Series("e", [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]])
+        
+        result = (
+            queries
+            .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=2).alias("matches"))
+            .explode("matches")
+            .unnest("matches")
+            .collect()
+        )
+        
+        assert len(result) == 4  # 2 queries × 2 top-k
+        assert "index" in result.columns
+        assert "score" in result.columns
+    
+    def test_lazy_with_join_after(self):
+        """Test joining corpus metadata after pmm"""
+        queries = pl.LazyFrame({
+            "query_id": [0, 1],
+            "embedding": [[1.0, 0.0], [0.0, 1.0]],
+        })
+        
+        corpus = pl.DataFrame({
+            "corpus_id": [0, 1, 2],
+            "embedding": [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]],
+            "label": ["cat", "dog", "bird"],
+        })
+        
+        corpus_emb = corpus["embedding"]
+        
+        # Get corpus metadata as lazy for join
+        corpus_meta = corpus.select(["label"]).with_row_index("index").lazy()
+        
+        result = (
+            queries
+            .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=1).alias("matches"))
+            .explode("matches")
+            .unnest("matches")
+            .join(corpus_meta, on="index", how="left")
+            .collect()
+        )
+        
+        assert "label" in result.columns
+        assert len(result) == 2
+    
+    def test_lazy_with_group_by_after(self):
+        """Test group_by aggregation after pmm"""
+        queries = pl.LazyFrame({
+            "category": ["A", "A", "B"],
+            "embedding": [[1.0, 0.0], [0.9, 0.1], [0.0, 1.0]],
+        })
+        
+        corpus_emb = pl.Series("e", [[1.0, 0.0], [0.0, 1.0]])
+        
+        result = (
+            queries
+            .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=1).alias("matches"))
+            .explode("matches")
+            .unnest("matches")
+            .group_by("category")
+            .agg([
+                pl.col("score").mean().alias("avg_score"),
+                pl.col("index").n_unique().alias("unique_matches"),
+            ])
+            .collect()
+        )
+        
+        assert len(result) == 2  # A and B categories
+        assert "avg_score" in result.columns
+    
+    def test_lazy_matmul_basic(self):
+        """Test lazy matmul operation"""
+        queries = pl.LazyFrame({
+            "embedding": [[1.0, 2.0], [3.0, 4.0]],
+        })
+        
+        corpus_emb = pl.Series("e", [[1.0, 0.0], [0.0, 1.0]])
+        
+        result = (
+            queries
+            .with_columns(pl.col("embedding").pmm.matmul(corpus_emb).alias("scores"))
+            .collect()
+        )
+        
+        assert "scores" in result.columns
+        # First row: [1,2] @ [[1,0], [0,1]]^T = [1, 2]
+        scores_0 = result["scores"][0].to_list()
+        assert abs(scores_0[0] - 1.0) < 1e-6
+        assert abs(scores_0[1] - 2.0) < 1e-6
+    
+    def test_lazy_with_streaming(self):
+        """Test lazy evaluation with streaming (if supported)"""
+        # Create a larger dataset to test streaming behavior
+        n_queries = 100
+        dim = 32
+        
+        np.random.seed(42)
+        embeddings = [np.random.randn(dim).tolist() for _ in range(n_queries)]
+        
+        queries = pl.LazyFrame({
+            "query_id": list(range(n_queries)),
+            "embedding": embeddings,
+        })
+        
+        corpus_emb = pl.Series("e", [np.random.randn(dim).tolist() for _ in range(50)])
+        
+        # This should work with or without streaming
+        result = (
+            queries
+            .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=5).alias("matches"))
+            .collect()
+        )
+        
+        assert len(result) == n_queries
+    
+    def test_lazy_empty_after_filter(self):
+        """Test handling when filter results in empty dataframe"""
+        queries = pl.LazyFrame({
+            "query_id": [0, 1],
+            "embedding": [[1.0, 0.0], [0.0, 1.0]],
+            "active": [False, False],
+        })
+        
+        corpus_emb = pl.Series("e", [[1.0, 0.0]])
+        
+        result = (
+            queries
+            .filter(pl.col("active"))  # Filters out everything
+            .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=1).alias("matches"))
+            .collect()
+        )
+        
+        # Should return empty dataframe, not error
+        assert len(result) == 0
+        assert "matches" in result.columns
+    
+    def test_lazy_with_limit(self):
+        """Test lazy with limit/head before pmm"""
+        queries = pl.LazyFrame({
+            "query_id": list(range(100)),
+            "embedding": [[float(i), 0.0] for i in range(100)],
+        })
+        
+        corpus_emb = pl.Series("e", [[1.0, 0.0], [0.0, 1.0]])
+        
+        result = (
+            queries
+            .head(5)
+            .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=1).alias("matches"))
+            .collect()
+        )
+        
+        assert len(result) == 5
+    
+    def test_lazy_with_sort_before(self):
+        """Test lazy with sort before pmm"""
+        queries = pl.LazyFrame({
+            "query_id": [2, 0, 1],
+            "embedding": [[0.5, 0.5], [1.0, 0.0], [0.0, 1.0]],
+        })
+        
+        corpus_emb = pl.Series("e", [[1.0, 0.0], [0.0, 1.0]])
+        
+        result = (
+            queries
+            .sort("query_id")
+            .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=1).alias("matches"))
+            .collect()
+        )
+        
+        assert result["query_id"].to_list() == [0, 1, 2]
+        assert len(result) == 3
+    
+    def test_lazy_array_type_optimization(self):
+        """Test that Array type works correctly in lazy context"""
+        dim = 8
+        queries = pl.LazyFrame({
+            "embedding": [[1.0] * dim, [2.0] * dim, [0.5] * dim],
+        }).with_columns(pl.col("embedding").cast(pl.Array(pl.Float32, dim)))
+        
+        corpus_emb = pl.Series("e", [[1.0] * dim, [0.0] * dim]).cast(pl.Array(pl.Float32, dim))
+        
+        result = (
+            queries
+            .with_columns(pl.col("embedding").pmm.topk(corpus_emb, k=1).alias("matches"))
+            .collect()
+        )
+        
+        assert len(result) == 3
+
