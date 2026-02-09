@@ -127,11 +127,12 @@ jobs:
     strategy:
       matrix:
         target: [x86_64]
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: ${{ matrix.python-version }}
       - uses: actions/download-artifact@v4
         with:
           name: wheels-linux-${{ matrix.target }}
@@ -141,7 +142,15 @@ jobs:
           ls -R dist/
           python -c "import sys; print(sys.version); print(sys.platform)"
           pip install pytest numpy pyarrow polars
-          pip install dist/*cp310*.whl --force-reinstall
+          # Use find to locate wheel matching major.minor version
+          # e.g. 3.9 -> cp39, 3.10 -> cp310
+          # We can use python version from matrix, convert to compact form
+          PY_VER_NODOT=$(echo "${{ matrix.python-version }}" | tr -d '.')
+          # Handle 3.10 case (cp310) vs 3.9 (cp39) vs 3.8 (cp38) etc
+          # Find wheel file containing "cp${PY_VER_NODOT}"
+          WHEEL_FILE=$(find dist -name "*cp${PY_VER_NODOT}*.whl" | head -n 1)
+          echo "Installing $WHEEL_FILE"
+          pip install "$WHEEL_FILE" --force-reinstall
           pytest tests/ -v -s
       - name: Run Benchmark
         run: |
@@ -154,11 +163,12 @@ jobs:
     strategy:
       matrix:
         target: [aarch64]
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: ${{ matrix.python-version }}
       - uses: actions/download-artifact@v4
         with:
           name: wheels-macos-${{ matrix.target }}
@@ -168,7 +178,10 @@ jobs:
           ls -R dist/
           python -c "import sys; print(sys.version); print(sys.platform)"
           pip install pytest numpy pyarrow polars
-          pip install dist/*cp310*.whl --force-reinstall
+          PY_VER_NODOT=$(echo "${{ matrix.python-version }}" | tr -d '.')
+          WHEEL_FILE=$(find dist -name "*cp${PY_VER_NODOT}*.whl" | head -n 1)
+          echo "Installing $WHEEL_FILE"
+          pip install "$WHEEL_FILE" --force-reinstall
           pytest tests/ -v -s
       - name: Run Benchmark
         run: |
@@ -181,11 +194,12 @@ jobs:
     strategy:
       matrix:
         target: [x64]
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: ${{ matrix.python-version }}
       - uses: actions/download-artifact@v4
         with:
           name: wheels-windows-${{ matrix.target }}
@@ -195,7 +209,8 @@ jobs:
           dir dist
           python -c "import sys; print(sys.version); print(sys.platform)"
           pip install pytest numpy pyarrow polars
-          Get-ChildItem dist\*cp310*.whl | ForEach-Object { pip install $_.FullName --force-reinstall }
+          $ver = "${{ matrix.python-version }}" -replace '\.'
+          Get-ChildItem dist\*cp$ver*.whl | ForEach-Object { pip install $_.FullName --force-reinstall }
           pytest tests/ -v -s
       - name: Run Benchmark
         run: |
